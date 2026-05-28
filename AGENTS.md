@@ -4,11 +4,11 @@
 
 ```
 FREEBUFF-PROXY/
-├── proxy.js              # Main proxy implementation (1317 lines)
-├── dashboard.html        # Liquid glass dashboard with OAuth UI (961 lines)
+├── proxy.js              # Main proxy implementation (1646 lines)
+├── dashboard.html        # Liquid glass dashboard with OAuth UI (1023 lines)
 ├── .config/
 │   └── config.json       # Runtime configuration
-├── package.json          # Project metadata (freebuff, node-forge)
+├── package.json          # Project metadata (freebuff, node-forge, node-fetch, socks-proxy-agent)
 ├── start.cmd             # Auto-detect launcher (Bun preferred, Node fallback)
 ├── start-node.cmd        # Node.js-only launcher
 ├── README.md             # User documentation
@@ -49,9 +49,9 @@ FREEBUFF-PROXY/
 - `startRun(authToken, agentID, ancestorRunIds)` — `POST /api/v1/agent-runs` with `action: 'START'`
 - `finishRun(authToken, runID, totalSteps)` — `POST /api/v1/agent-runs` with `action: 'FINISH'`
 - `recordRunStep(authToken, runID, stepNumber, childRunIds, messageId, startTime)` — `POST /api/v1/agent-runs/{id}/steps`
-- `chatCompletions(authToken, body)` — `POST /api/v1/chat/completions` (streaming-aware)
-- `createSession(authToken, model)` — `POST /api/v1/freebuff/session`
-- `getSession(authToken, instanceID)` — `GET /api/v1/freebuff/session` with `x-freebuff-instance-id` header
+- `chatCompletions(authToken, body, proxyAgent)` — `POST /api/v1/chat/completions` (streaming-aware, uses `node-fetch` + `SocksProxyAgent` when proxyAgent provided, global `fetch` otherwise)
+- `createSession(authToken, model, proxyAgent, countryCode)` — `POST /api/v1/freebuff/session`
+- `getSession(authToken, instanceID, proxyAgent)` — `GET /api/v1/freebuff/session` with `x-freebuff-instance-id` header
 - `endSession(authToken, instanceID)` — `DELETE /api/v1/freebuff/session`
 - Handles 426 (`freebuff_update_required`) and `model_locked` errors specially
 
@@ -66,7 +66,18 @@ FREEBUFF-PROXY/
 - `invalidateSession(token, model)` — Removes specific session from cache
 - Session key format: `{token}:{model}`
 
-### 6. Run Chain Helpers (lines 569-603)
+### 6. WarpPlusManager (lines 412-520)
+
+- Manages a SOCKS5 proxy via the `warp-plus` binary for bypassing rate limits
+- `ensureBinary()` — Downloads `warp-plus.exe` from GitHub releases if not present
+- `start()` — Spawns the binary on `127.0.0.1:8086`, waits up to 20s for readiness
+- `_waitForReady(timeout)` — Polls SOCKS5 connectivity via `nodeFetch` to `api.ipify.org`
+- `stop()` — Kills the process and resets state
+- `isReady()` — Returns true when process is running and proxy agent is created
+- `getAgent()` — Returns `SocksProxyAgent` instance for use with `node-fetch`
+- Used by `proxyChatRequest` when `accessTier === 'limited'` to route through Cloudflare WARP
+
+### 7. Run Chain Helpers (lines 569-603)
 
 Two distinct run chain patterns:
 
@@ -84,7 +95,7 @@ Finalization:
 - `finalizeRunChainNormal` — Records step 2 + finishes parent
 - `finalizeRunChainGemini` — Records steps + finishes both chat and parent runs
 
-### 7. Utility Functions (lines 605-754)
+### 8. Utility Functions (lines 605-754)
 
 - `generateClientSessionId()` — 13-char random alphanumeric string
 - `cloneMap()` / `cloneSlice()` — Deep clone objects/arrays
@@ -95,10 +106,13 @@ Finalization:
 - `simplifyNullableCombinator(schema, key)` — Simplifies `anyOf`/`oneOf` with null types
 - `normalizeTypeField()` — Converts array types to single string
 - `normalizeEnumField()` — Deduplicates enum values, removes nulls
-- `isSessionInvalid(statusCode, errorBody)` — Checks for retryable session errors (426, `session_superseded`, `waiting_room_required`, etc.)
+- `isNodeStream(body)` — Checks if body is a Node.js stream (has `.pipe` and `.on`)
+- `readBodyText(body)` — Reads body to string, handles Node streams, web `ReadableStream` (`getReader`), async iterables, and string fallback
+- `pipeBodyToResponse(body, res)` — Pipes body to HTTP response (Node stream or web `ReadableStream`)
+- `isSessionInvalid(statusCode, errorBody)` — Checks for retryable session errors (426, `session_superseded`, `waiting_room_required`, `session_model_mismatch`, etc.)
 - `isRunInvalid(statusCode, body)` — Checks for `runid not found` / `runid not running`
 
-### 8. HTTP Handlers (lines 756-1089)
+### 9. HTTP Handlers (lines 756-1089)
 
 - `authorized(req)` — Checks `x-api-key` header or `Authorization: Bearer` against `config.apiKeys`
 - `readBody(req)` — Reads full request body into string
@@ -119,10 +133,12 @@ Finalization:
   7. Forward to upstream
   8. Handle success (streaming or non-streaming)
   9. On error: invalidate session or retry if run expired
+  10. On `session_model_mismatch`: switch to locked model (`deepseek/deepseek-v4-flash`) and retry
+  11. On Warp Plus failure: test SOCKS5 connectivity, fall back to direct connection
 - `writeOpenAISuccessResponse()` — Pipes SSE stream or copies full response
 - `writeClaudeSuccessResponse()` — Streams SSE or converts non-stream response to Anthropic format
 
-### 9. Anthropic Conversion (lines 1024-1088)
+### 10. Anthropic Conversion (lines 1024-1088)
 
 - `convertClaudeMessagesRequestToOpenAI(body)` — Converts Anthropic messages format:
   - Extracts `system` field → system message
@@ -157,7 +173,7 @@ Routes by pathname:
 - `/v1/messages` → Anthropic messages
 - `/v1/messages/count_tokens` → Anthropic token counting
 
-### 12. Dashboard (dashboard.html, 961 lines)
+### 12. Dashboard (dashboard.html, 1023 lines)
 
 - **Liquid Glass Engine** — Canvas-generated displacement maps with refraction profiles (`calculateRefractionProfile`, `generateDisplacementMap`, `generateSpecularMap`)
 - **SVG Filter Pipeline** — `feGaussianBlur` → `feDisplacementMap` → `feColorMatrix` → `feComposite` → `feBlend`
@@ -295,6 +311,16 @@ On Windows, `start.cmd` handles window title management and port cleanup automat
 
 If upstream returns `freebuff_update_required` (HTTP 426), the proxy invalidates the current session and retries. `checkAndUpdateVersions()` runs on startup and every hour.
 
+### Body Stream Handling
+
+The proxy uses two different `fetch` implementations:
+- **Global `fetch`** (Node 18+ built-in) — returns web `ReadableStream` for `resp.body`
+- **`node-fetch`** (v2.7.0) — returns Node.js `Readable` stream for `resp.body`
+
+The `readBodyText()` function handles both: it checks for Node streams (`.pipe`/`.on`), web streams (`.getReader`), async iterables, and falls back to `String()`. The `pipeBodyToResponse()` function similarly handles both stream types.
+
+When adding new upstream calls, always use `readBodyText()` instead of `resp.body.text()` or `resp.text()` to avoid crashes.
+
 ## Testing
 
 ```bash
@@ -326,7 +352,9 @@ curl -X POST http://localhost:8080/v1/messages \
 ```json
 {
   "freebuff": "^0.0.96",
-  "node-forge": "^1.4.0"
+  "node-forge": "^1.4.0",
+  "node-fetch": "^2.7.0",
+  "socks-proxy-agent": "^8.0.0"
 }
 ```
 

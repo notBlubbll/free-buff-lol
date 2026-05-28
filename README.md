@@ -1,13 +1,13 @@
 # Frebuff2Opencode Proxy
 
-OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free access to multiple LLM models through a unified API. Translated from the Go implementation [Frebuff2Opencode](https://github.com/Quorinex/Freebuff2API) to Node.js/Bun.
+OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free access to multiple LLM models through a unified API. Translated from the Go implementation [Frebuff2Opencode](https://github.com/Quorinex/Frebuff2Opencode) to Node.js/Bun.
 
 <img width="875" height="610" alt="image" src="https://github.com/user-attachments/assets/87d0a282-f32c-4b34-8ea5-6c52ab70ec3d" />
 
 
 <img width="653" height="442" alt="image" src="https://github.com/user-attachments/assets/be4a5a3e-64f9-49c1-8ae1-0a0a52ad85cd" />
 
-<img width="160" height="169" alt="image" src="https://github.com/user-attachments/assets/35ea5597-7377-4007-9da5-a1e1948e7ed6" />
+<img width="256" height="167" alt="image" src="https://github.com/user-attachments/assets/10b90548-897b-409f-afbd-e4a3de7b2a98" />
 
 
 ## Features
@@ -24,6 +24,7 @@ OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free acces
 - **Ad Integration** — Fetches and displays upstream ads in the dashboard
 - **Version Auto-Update** — Tracks Bun, Freebuff CLI, and SDK versions from upstream sources
 - **Auto-Config** — Automatically configures opencode provider on startup
+- **Warp Plus Proxy** — SOCKS5 proxy via Cloudflare WARP for bypassing rate limits on limited-tier sessions
 
 ## Available Models
 
@@ -79,6 +80,10 @@ Within the full tier, two models are marked as **premium** and may require addit
 - `deepseek/deepseek-v4-flash` (Most efficient) — Non-premium, **collects data for training**
 
 New freebuff users typically start in **limited tier**, which only allows `deepseek/deepseek-v4-flash` — the model that collects data for training. To access all models, you need full tier access.
+
+When the upstream returns a `session_model_mismatch` error (e.g., requesting `minimax/minimax-m2.7` on a limited-tier session), the proxy automatically switches to `deepseek/deepseek-v4-flash` and retries. This is transparent to the client.
+
+For limited-tier sessions, the proxy also attempts to route requests through a **Warp Plus** SOCKS5 proxy (Cloudflare WARP) to bypass rate limits. If Warp Plus fails to start or connect, the proxy falls back to direct connection.
 
 Session limits apply to both tiers:
 - **5 sessions per day** (resets at midnight Pacific time)
@@ -310,19 +315,20 @@ Access the dashboard at `http://localhost:8080`:
 ## Architecture
 
 ```
-proxy.js (~1317 lines)
+proxy.js (~1646 lines)
 ├── Version Tracking     — Auto-updates Bun/CLI/SDK versions from upstream
 ├── Config System        — JSON + env vars + CLI token auto-detection
 ├── ModelRegistry        — Parses TypeScript sources from GitHub
-├── UpstreamClient       — HTTP client for Freebuff backend
+├── UpstreamClient       — HTTP client for Freebuff backend (node-fetch + SOCKS5 support)
 ├── TokenPool            — Session management with mutex locking
+├── WarpPlusManager      — SOCKS5 proxy via warp-plus binary for rate limit bypass
 ├── Run Chain Helpers    — Normal and Gemini run lifecycle
 ├── Tool Schema Norm.    — $ref resolution and schema normalization
 ├── HTTP Handlers        — OpenAI + Anthropic + management endpoints
 ├── OAuth Flow           — Browser-based GitHub authentication
 └── Server Startup       — Validation, prewarm, token reload loop
 
-dashboard.html (961 lines)
+dashboard.html (1023 lines)
 ├── Liquid Glass Engine  — Canvas-based displacement/specular maps
 ├── OAuth UI             — Token generation with polling
 ├── Model Manager        — Toggleable model checkboxes
@@ -378,10 +384,26 @@ Multiple edits can create duplicate code blocks:
 node --check proxy.js
 ```
 
+### Warp Plus Issues
+
+If Warp Plus fails to start or the SOCKS5 proxy on port 8086 is not reachable:
+- The proxy automatically falls back to direct connection
+- Check if another process is using port 8086
+- The `warp-plus.exe` binary is downloaded automatically on first use
+
+### Model Lock Errors
+
+If you see `session_model_mismatch` errors:
+- Your session is in **limited tier** — only `deepseek/deepseek-v4-flash` is available
+- The proxy automatically switches to this model and retries
+- No user action needed — this is handled transparently
+
 ## Dependencies
 
 - `freebuff` (^0.0.96) — CLI token detection
 - `node-forge` (^1.4.0) — Cryptographic operations
+- `node-fetch` (^2.7.0) — HTTP client with SOCKS5 proxy support
+- `socks-proxy-agent` (^8.0.0) — SOCKS5 proxy agent for Warp Plus
 
 Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 

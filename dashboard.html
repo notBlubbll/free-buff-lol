@@ -366,6 +366,10 @@
                 <div class="fw-medium" id="runtimeInfo">-</div>
               </div>
               <div class="mb-2">
+                <small class="text-muted">Warp Plus</small>
+                <div class="fw-medium" id="operaProxyStatus">-</div>
+              </div>
+              <div class="mb-2">
                 <small class="text-muted">Started At</small>
                 <div class="fw-medium" id="startedAt">-</div>
               </div>
@@ -586,6 +590,7 @@
     let adsEnabled = true;
     let remainingMsAtFetch = 0;
     let remainingMsTimestamp = 0;
+    let countryCodeSet = false;
     let adsList = [];
     let currentAdIdx = 0;
     let adImpressionSent = new Set();
@@ -947,8 +952,19 @@
       document.getElementById('totalModels').textContent = models.length;
       document.getElementById('startedAt').textContent = new Date(proxyData.started_at).toLocaleString();
       document.getElementById('tokenCountBadge').textContent = proxyData.token_state.length;
-      const bestToken = proxyData.token_state.find(t => t.country_code) || proxyData.token_state[0];
-      document.getElementById('countryCode').textContent = bestToken?.country_code || '-';
+      if (!countryCodeSet) {
+        const bestToken = proxyData.token_state.find(t => t.country_code) || proxyData.token_state[0];
+        const cc = bestToken?.country_code || '-';
+        const tier = bestToken?.access_tier || '';
+        const el = document.getElementById('countryCode');
+        el.textContent = cc;
+        if (tier === 'limited') {
+          const small = document.createElement('small');
+          small.textContent = '(limit)';
+          el.appendChild(small);
+        }
+        if (cc !== '-') countryCodeSet = true;
+      }
       const activeToken = proxyData.token_state.find(t => t.remaining_ms && t.remaining_ms > 0);
       if (activeToken) {
         remainingMsAtFetch = activeToken.remaining_ms;
@@ -961,6 +977,19 @@
       updateRemainingDisplay();
       if (proxyData.runtime) {
         document.getElementById('runtimeInfo').textContent = proxyData.runtime + ' v' + proxyData.runtime_version;
+      }
+      if (proxyData.opera_proxy) {
+        const el = document.getElementById('operaProxyStatus');
+        if (!proxyData.opera_proxy.enabled) {
+          el.textContent = 'Disabled';
+          el.style.color = '#888';
+        } else if (proxyData.opera_proxy.running) {
+          el.textContent = 'Running';
+          el.style.color = '#4caf50';
+        } else {
+          el.textContent = 'Ready';
+          el.style.color = '#ff9800';
+        }
       }
     }
 

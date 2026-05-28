@@ -6,6 +6,9 @@ const http = require('http');
 const https = require('https');
 const url = require('url');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
+const nodeFetch = require('node-fetch');
+const { SocksProxyAgent } = require('socks-proxy-agent');
 
 const FREE_AGENTS_SOURCE_URL = 'https://raw.githubusercontent.com/CodebuffAI/codebuff/main/common/src/constants/free-agents.ts';
 const FREEBUFF_MODELS_SOURCE_URL = 'https://raw.githubusercontent.com/CodebuffAI/codebuff/main/common/src/constants/freebuff-models.ts';
@@ -130,6 +133,7 @@ function loadConfig() {
   if (process.env.REQUEST_TIMEOUT) rawConfig.REQUEST_TIMEOUT = process.env.REQUEST_TIMEOUT;
   if (process.env.AUTH_TOKENS) rawConfig.AUTH_TOKENS = process.env.AUTH_TOKENS.split(',').map(t => t.trim()).filter(Boolean);
   if (process.env.API_KEYS) rawConfig.API_KEYS = process.env.API_KEYS.split(',').map(t => t.trim()).filter(Boolean);
+  if (process.env.WARP_PLUS !== undefined) rawConfig.WARP_PLUS = process.env.WARP_PLUS === 'true';
   if (!rawConfig.AUTH_TOKENS || rawConfig.AUTH_TOKENS.length === 0) {
     const cliTokens = loadFreebuffCLITokens();
     if (cliTokens.length > 0) { rawConfig.AUTH_TOKENS = cliTokens; console.log(`Loaded ${cliTokens.length} token(s) from Freebuff CLI`); }
@@ -145,7 +149,8 @@ function loadConfig() {
     upstreamBaseURL: baseURL,
     authTokens: [...new Set(rawConfig.AUTH_TOKENS || [])],
     requestTimeout,
-    apiKeys: [...new Set(rawConfig.API_KEYS || [])]
+    apiKeys: [...new Set(rawConfig.API_KEYS || [])],
+    warpPlus: rawConfig.WARP_PLUS !== false
   };
 }
 
@@ -398,6 +403,122 @@ class ModelRegistry {
   getAgentIDs() { return Array.from(new Set(this.modelToAgent.values())); }
 }
 
+// --- Warp Plus Manager ---
+const WARP_PLUS_RELEASE_URL = 'https://github.com/bepass-org/warp-plus/releases/download/v1.2.6/warp-plus_windows-amd64.zip';
+const WARP_PLUS_BIN = path.join(__dirname, 'bin', 'warp-plus.exe');
+const WARP_PLUS_PORT = 8086;
+const WARP_PLUS_ADDR = `socks5://127.0.0.1:${WARP_PLUS_PORT}`;
+
+class WarpPlusManager {
+  constructor() {
+    this.process = null;
+    this.ready = false;
+    this.starting = false;
+    this.proxyAgent = null;
+  }
+
+  async ensureBinary() {
+    if (fs.existsSync(WARP_PLUS_BIN)) return true;
+    console.log('[WarpPlus] Binary not found, downloading...');
+    const binDir = path.dirname(WARP_PLUS_BIN);
+    if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+    const tmpPath = WARP_PLUS_BIN + '.tmp';
+    const zipPath = path.join(binDir, 'warp-plus.zip');
+    try {
+      const resp = await fetch(WARP_PLUS_RELEASE_URL, { redirect: 'follow' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const buffer = Buffer.from(await resp.arrayBuffer());
+      fs.writeFileSync(zipPath, buffer);
+      const { execSync } = require('child_process');
+      execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${binDir}' -Force"`);
+      fs.unlinkSync(zipPath);
+      if (!fs.existsSync(WARP_PLUS_BIN)) throw new Error('warp-plus.exe not found after extraction');
+      console.log('[WarpPlus] Binary downloaded successfully');
+      return true;
+    } catch (e) {
+      console.error('[WarpPlus] Failed to download binary:', e.message);
+      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
+      try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch {}
+      return false;
+    }
+  }
+
+  async start() {
+    if (this.process || this.starting) return true;
+    this.starting = true;
+    const hasBin = await this.ensureBinary();
+    if (!hasBin) { this.starting = false; return false; }
+    console.log(`[WarpPlus] Starting SOCKS5 proxy on port ${WARP_PLUS_PORT}...`);
+    try {
+      this.process = spawn(WARP_PLUS_BIN, ['-b', `127.0.0.1:${WARP_PLUS_PORT}`, '-4'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        cwd: path.dirname(WARP_PLUS_BIN)
+      });
+      this.process.stdout.on('data', (d) => {
+        const msg = d.toString().trim();
+        if (msg && !msg.includes('connection test failed')) console.log(`[WarpPlus] ${msg}`);
+      });
+      this.process.stderr.on('data', (d) => {
+        const msg = d.toString().trim();
+        if (msg && !msg.includes('connection test failed')) console.log(`[WarpPlus] ${msg}`);
+      });
+      this.process.on('exit', (code) => {
+        console.log(`[WarpPlus] Process exited with code ${code}`);
+        this.process = null;
+        this.ready = false;
+        this.proxyAgent = null;
+      });
+      this.process.on('error', (e) => {
+        console.error(`[WarpPlus] Process error: ${e.message}`);
+        this.process = null;
+        this.ready = false;
+        this.proxyAgent = null;
+      });
+      await this._waitForReady(20000);
+      this.proxyAgent = new SocksProxyAgent(WARP_PLUS_ADDR);
+      this.ready = true;
+      this.starting = false;
+      console.log('[WarpPlus] Ready');
+      return true;
+    } catch (e) {
+      console.error('[WarpPlus] Failed to start:', e.message);
+      this.stop();
+      this.starting = false;
+      return false;
+    }
+  }
+
+  async _waitForReady(timeout) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      try {
+        const agent = new SocksProxyAgent(WARP_PLUS_ADDR);
+        await nodeFetch('https://api.ipify.org?format=json', { agent, signal: AbortSignal.timeout(3000) });
+        break;
+      } catch {
+        if (this.process && !this.process.pid) throw new Error('process died');
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  }
+
+  stop() {
+    if (this.process) {
+      try { this.process.kill(); } catch {}
+      this.process = null;
+    }
+    this.ready = false;
+    this.proxyAgent = null;
+    this.starting = false;
+  }
+
+  isReady() { return this.ready && this.proxyAgent !== null; }
+  getAgent() { return this.proxyAgent; }
+}
+
+const warpPlus = new WarpPlusManager();
+
 // --- Upstream Client ---
 class UpstreamClient {
   constructor(cfg) {
@@ -476,18 +597,21 @@ class UpstreamClient {
     if (resp.status < 200 || resp.status >= 300) throw new Error(`record run step failed ${resp.status}: ${resp.body}`);
   }
 
-  chatCompletions(authToken, body) {
+  chatCompletions(authToken, body, proxyAgent) {
     const requestURL = this.baseURL + '/api/v1/chat/completions';
     const isStream = body && body.stream === true;
     const headers = this.chatHeaders(authToken, isStream);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout);
-    return fetch(requestURL, {
+    const fetchFn = proxyAgent ? nodeFetch : fetch;
+    const fetchOpts = {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
       signal: controller.signal
-    }).then(resp => {
+    };
+    if (proxyAgent) fetchOpts.agent = proxyAgent;
+    return fetchFn(requestURL, fetchOpts).then(resp => {
       clearTimeout(timer);
       const responseHeaders = {};
       resp.headers.forEach((v, k) => responseHeaders[k] = v);
@@ -498,31 +622,33 @@ class UpstreamClient {
     });
   }
 
-  createSession(authToken, model = '') {
+  createSession(authToken, model = '', proxyAgent, countryCode) {
     const extraHeaders = {};
     if (model) extraHeaders['x-freebuff-model'] = model;
-    return this.doSessionRequest('POST', authToken, '', extraHeaders);
+    return this.doSessionRequest('POST', authToken, '', extraHeaders, proxyAgent, countryCode);
   }
 
-  getSession(authToken, instanceID) {
-    return this.doSessionRequest('GET', authToken, instanceID);
+  getSession(authToken, instanceID, proxyAgent) {
+    return this.doSessionRequest('GET', authToken, instanceID, {}, proxyAgent);
   }
 
   endSession(authToken, instanceID = '') {
     return this.doSessionRequest('DELETE', authToken, instanceID);
   }
 
-  async doSessionRequest(method, authToken, instanceID, extraHeaders = {}) {
+  async doSessionRequest(method, authToken, instanceID, extraHeaders = {}, proxyAgent, countryCode) {
     const headers = { 'Authorization': `Bearer ${authToken}`, 'Accept': 'application/json', 'User-Agent': getApiUserAgent(), ...extraHeaders };
     if (instanceID && (method === 'GET' || method === 'DELETE')) headers['x-freebuff-instance-id'] = instanceID;
     if (method === 'POST') headers['Content-Type'] = 'application/json';
-    const body = method === 'POST' ? '{}' : null;
+    const body = method === 'POST' ? (countryCode ? JSON.stringify({ countryCode }) : '{}') : null;
     const requestURL = this.baseURL + '/api/v1/freebuff/session';
     console.log(`[DEBUG] Session ${method} sending to ${requestURL}`);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout);
     try {
-      const resp = await fetch(requestURL, { method, headers, body: body || undefined, signal: controller.signal });
+      const fetchOpts = { method, headers, body: body || undefined, signal: controller.signal };
+      if (proxyAgent) fetchOpts.dispatcher = proxyAgent;
+      const resp = await (proxyAgent ? undiciFetch : fetch)(requestURL, fetchOpts);
       clearTimeout(timer);
       const data = await resp.text();
       console.log(`[DEBUG] Session ${method} response (${resp.status}): ${data.substring(0, 300)}`);
@@ -599,11 +725,12 @@ class TokenPool {
         const expiresAt = state.expiresAt ? new Date(state.expiresAt) : null;
         const countryCode = state.countryCode || null;
         const remainingMs = state.remainingMs || null;
+        const accessTier = state.accessTier || null;
         await this.withLock(async () => {
-          this.sessions.set(key, { status: 'active', instanceID, expiresAt, countryCode, remainingMs });
+          this.sessions.set(key, { status: 'active', instanceID, expiresAt, countryCode, remainingMs, accessTier });
         });
-        console.log(`[DEBUG] ensureSession: returning instanceID=${instanceID} model=${model}`);
-        return { instanceID, model };
+        console.log(`[DEBUG] ensureSession: returning instanceID=${instanceID} model=${model} accessTier=${accessTier}`);
+        return { instanceID, model, accessTier };
       } catch (e) {
         const errorMsg = e.message || '';
         if (errorMsg.includes('model_locked')) {
@@ -929,6 +1056,7 @@ async function handleHealthz(req, res) {
       session_instance_id: bestSession?.instanceID || null,
       session_expires_at: bestSession?.expiresAt || null,
       country_code: bestSession?.countryCode || null,
+      access_tier: bestSession?.accessTier || null,
       remaining_ms: bestSession?.remainingMs || null,
       runs: []
     };
@@ -940,7 +1068,12 @@ async function handleHealthz(req, res) {
     models_count: modelRegistry.getModels().length,
     valid_tokens: tokenPool.tokens.length,
     runtime: IS_BUN ? 'bun' : 'node',
-    runtime_version: RUNTIME_VERSION
+    runtime_version: RUNTIME_VERSION,
+    opera_proxy: {
+      enabled: config.warpPlus,
+      running: warpPlus.isReady(),
+      port: WARP_PLUS_PORT
+    }
   });
 }
 
@@ -1004,13 +1137,16 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
   if (!token) { writeError(res, 503, 'no authentication tokens configured', 'server_error', 'no_tokens'); return; }
   const client = tokenPool.client;
 
+  let currentModel = requestedModel;
   for (let attempt = 0; attempt < 2; attempt++) {
     let sessionInstanceID;
-    let actualModel = requestedModel;
+    let actualModel = currentModel;
+    let accessTier = null;
     try {
-      const session = await tokenPool.ensureSession(token, requestedModel);
+      const session = await tokenPool.ensureSession(token, currentModel);
       sessionInstanceID = session.instanceID;
       actualModel = session.model;
+      accessTier = session.accessTier;
     } catch (e) {
       writeError(res, 502, `failed to acquire upstream free session: ${e.message}`, 'server_error', '');
       return;
@@ -1028,7 +1164,28 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
       return;
     }
 
-    console.log(`[Request] model: ${actualModel}, run: ${run.runId}`);
+    let proxyAgent = null;
+    if (accessTier === 'limited' && config.warpPlus) {
+      if (!warpPlus.isReady()) {
+        console.log('[Proxy] Limit detected, starting Warp Plus...');
+        const started = await warpPlus.start();
+        if (!started) {
+          console.log('[Proxy] Warp Plus failed to start, falling back to direct connection');
+        }
+      }
+      if (warpPlus.isReady()) {
+        try {
+          await nodeFetch('https://api.ipify.org?format=json', { agent: warpPlus.getAgent(), signal: AbortSignal.timeout(5000) });
+          proxyAgent = warpPlus.getAgent();
+          console.log('[Proxy] Routing chat through Warp Plus');
+        } catch (e) {
+          console.log(`[Proxy] Warp Plus connectivity test failed (${e.message}), falling back to direct connection`);
+          warpPlus.stop();
+        }
+      }
+    }
+
+    console.log(`[Request] model: ${actualModel}, run: ${run.runId}, tier: ${accessTier || 'normal'}${proxyAgent ? ', via warp' : ''}`);
 
     const cloned = cloneMap(payload);
     cloned.model = actualModel;
@@ -1042,7 +1199,16 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     if (sessionInstanceID) cloned.codebuff_metadata.freebuff_instance_id = sessionInstanceID;
 
     let resp;
-    try { resp = await client.chatCompletions(token, cloned); } catch (e) { writeError(res, 502, e.message, 'server_error', ''); return; }
+    try { resp = await client.chatCompletions(token, cloned, proxyAgent); } catch (e) {
+      if (proxyAgent) {
+        console.log(`[Proxy] Warp Plus failed (${e.message}), retrying direct connection...`);
+        proxyAgent = null;
+        try { resp = await client.chatCompletions(token, cloned, null); } catch (e2) { writeError(res, 502, e2.message, 'server_error', ''); return; }
+      } else {
+        writeError(res, 502, e.message, 'server_error', '');
+        return;
+      }
+    }
 
     if (resp.status >= 200 && resp.status < 300) {
       let messageId = null;
@@ -1052,18 +1218,27 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
       return;
     }
 
-    const errorBodyStr = await resp.body.text();
+    const errorBodyStr = await readBodyText(resp.body);
     console.log(`[Upstream Error] ${resp.status}: ${errorBodyStr.substring(0, 200)}`);
 
     if (isSessionInvalid(resp.status, errorBodyStr)) {
       let errorType = '';
-      try { const errorData = JSON.parse(errorBodyStr); errorType = errorData.error || ''; } catch (e) {}
-      console.log(`[Session Invalid] status=${resp.status}, error=${errorType}`);
+      let lockedModel = null;
+      try {
+        const errorData = JSON.parse(errorBodyStr);
+        errorType = errorData.error || '';
+        if (errorType === 'session_model_mismatch') lockedModel = errorData.lockedModel || 'deepseek/deepseek-v4-flash';
+      } catch (e) {}
+      console.log(`[Session Invalid] status=${resp.status}, error=${errorType}${lockedModel ? ', lockedModel=' + lockedModel : ''}`);
       
       if (errorType === 'freebuff_update_required' || resp.status === 426) {
         console.log(`[Version] Server requires update, invalidating session and retrying...`);
       }
       tokenPool.invalidateSession(token, actualModel);
+      if (lockedModel) {
+        console.log(`[Model Lock] Switching from ${currentModel} to ${lockedModel}`);
+        currentModel = lockedModel;
+      }
       continue;
     }
 
@@ -1080,6 +1255,64 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
   writeError(res, 502, 'upstream run expired twice in a row', 'server_error', '');
 }
 
+function isNodeStream(body) {
+  return body && typeof body.pipe === 'function' && typeof body.on === 'function';
+}
+
+function readBodyText(body) {
+  if (isNodeStream(body)) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      body.on('data', c => chunks.push(c));
+      body.on('end', () => resolve(Buffer.concat(chunks).toString()));
+      body.on('error', reject);
+    });
+  }
+  if (body && typeof body.getReader === 'function') {
+    const reader = body.getReader();
+    const chunks = [];
+    return new Promise((resolve, reject) => {
+      function pump() {
+        reader.read().then(({ done, value }) => {
+          if (done) { resolve(Buffer.concat(chunks).toString()); return; }
+          chunks.push(Buffer.from(value));
+          pump();
+        }).catch(reject);
+      }
+      pump();
+    });
+  }
+  if (body && typeof body[Symbol.asyncIterator] === 'function') {
+    const chunks = [];
+    return (async () => {
+      for await (const chunk of body) chunks.push(Buffer.from(chunk));
+      return Buffer.concat(chunks).toString();
+    })();
+  }
+  return String(body);
+}
+
+function pipeBodyToResponse(body, res) {
+  if (isNodeStream(body)) {
+    return new Promise((resolve, reject) => {
+      body.on('data', chunk => res.write(chunk));
+      body.on('end', () => { res.end(); resolve(); });
+      body.on('error', reject);
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const reader = body.getReader();
+    function pump() {
+      reader.read().then(({ done, value }) => {
+        if (done) { res.end(); resolve(); return; }
+        res.write(value);
+        pump();
+      }).catch(reject);
+    }
+    pump();
+  });
+}
+
 async function writeOpenAISuccessResponse(res, resp) {
   for (const [key, values] of Object.entries(resp.headers)) {
     if (key.toLowerCase() === 'content-length') continue;
@@ -1089,25 +1322,9 @@ async function writeOpenAISuccessResponse(res, resp) {
   let messageId = null;
 
   if (resp.headers['content-type']?.includes('text/event-stream')) {
-    // Streaming: pipe the ReadableStream directly
-    await new Promise((resolve, reject) => {
-      const reader = resp.body.getReader();
-      function pump() {
-        reader.read().then(({ done, value }) => {
-          if (done) {
-            res.end();
-            resolve();
-            return;
-          }
-          res.write(value);
-          pump();
-        }).catch(reject);
-      }
-      pump();
-    });
+    await pipeBodyToResponse(resp.body, res);
   } else {
-    // Non-streaming: read full body as text
-    const buffer = await resp.body.text();
+    const buffer = await readBodyText(resp.body);
     res.end(buffer);
     try { const parsed = JSON.parse(buffer); if (parsed.id) messageId = parsed.id; } catch (e) {}
   }
@@ -1118,24 +1335,10 @@ async function writeOpenAISuccessResponse(res, resp) {
 async function writeClaudeSuccessResponse(res, resp, requestedModel, stream) {
   if (stream) {
     res.writeHead(resp.status, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
-    await new Promise((resolve, reject) => {
-      const reader = resp.body.getReader();
-      function pump() {
-        reader.read().then(({ done, value }) => {
-          if (done) {
-            res.end();
-            resolve();
-            return;
-          }
-          res.write(value);
-          pump();
-        }).catch(reject);
-      }
-      pump();
-    });
+    await pipeBodyToResponse(resp.body, res);
     return null;
   }
-  const body = await resp.body.text();
+  const body = await readBodyText(resp.body);
   const converted = convertOpenAINonStreamResponseToClaude(body);
   res.writeHead(resp.status, { 'Content-Type': 'application/json' });
   res.end(converted);
@@ -1415,6 +1618,7 @@ async function startServer() {
     console.log(`  Models: ${modelRegistry.getModels().length}`);
     console.log(`  API keys: ${config.apiKeys.length > 0 ? config.apiKeys.length + ' (auth enabled)' : 'none (open access)'}`);
     console.log(`  Valid tokens: ${validTokens.length}`);
+    console.log(`  Warp Plus: ${config.warpPlus ? 'enabled (auto-start on limit)' : 'disabled'}`);
     console.log('');
   });
 
