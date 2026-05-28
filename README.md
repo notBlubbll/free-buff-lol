@@ -7,7 +7,7 @@ OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free acces
 
 <img width="653" height="442" alt="image" src="https://github.com/user-attachments/assets/be4a5a3e-64f9-49c1-8ae1-0a0a52ad85cd" />
 
-<img width="256" height="167" alt="image" src="https://github.com/user-attachments/assets/10b90548-897b-409f-afbd-e4a3de7b2a98" />
+<img width="160" height="169" alt="image" src="https://github.com/user-attachments/assets/35ea5597-7377-4007-9da5-a1e1948e7ed6" />
 
 
 ## Features
