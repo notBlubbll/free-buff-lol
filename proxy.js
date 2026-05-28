@@ -1092,7 +1092,7 @@ async function handleHealthz(req, res) {
 async function handleModels(req, res) {
   if (req.method !== 'GET') { writeOpenAIError(res, 405, 'method not allowed', 'invalid_request_error', ''); return; }
   const created = Math.floor(startTime.getTime() / 1000);
-  writeJSON(res, 200, { object: 'list', data: modelRegistry.getModels().map(m => ({ id: m, object: 'model', created, owned_by: 'Frebuff2Opencode', root: m, permission: [] })) });
+  writeJSON(res, 200, { object: 'list', data: modelRegistry.getModels().map(m => ({ id: m, object: 'model', created, owned_by: 'Freebuff2Opencode', root: m, permission: [] })) });
 }
 
 async function handleChatCompletions(req, res) {
@@ -1588,7 +1588,7 @@ async function handleRequest(req, res) {
 // --- Server Startup ---
 async function startServer() {
   console.log('╔═══════════════════════════════════════════════════════════════╗');
-  console.log('║  Frebuff2Opencode Proxy - Starting...                            ║');
+  console.log('║  Freebuff2Opencode Proxy - Starting...                            ║');
   console.log('╚═══════════════════════════════════════════════════════════════╝');
 
   try { config = loadConfig(); } catch (e) { console.error('Failed to load config:', e.message); process.exit(1); }
@@ -1625,7 +1625,7 @@ async function startServer() {
 
   const server = http.createServer(handleRequest);
   server.listen(port, '0.0.0.0', () => {
-    console.log(`\nFrebuff2Opencode Proxy on http://0.0.0.0:${port}`);
+    console.log(`\nFreebuff2Opencode Proxy on http://0.0.0.0:${port}`);
     console.log(`  Upstream: ${config.upstreamBaseURL}`);
     console.log(`  Models: ${modelRegistry.getModels().length}`);
     console.log(`  API keys: ${config.apiKeys.length > 0 ? config.apiKeys.length + ' (auth enabled)' : 'none (open access)'}`);
