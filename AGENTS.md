@@ -71,10 +71,11 @@ FREEBUFF-PROXY/
 - Manages a SOCKS5 proxy via the `warp-plus` binary for bypassing rate limits
 - `ensureBinary()` — Downloads `warp-plus.exe` from GitHub releases if not present
 - `start()` — Spawns the binary on `127.0.0.1:8086`, waits up to 20s for readiness
-- `_waitForReady(timeout)` — Polls SOCKS5 connectivity via `nodeFetch` to `api.ipify.org`
+- `_waitForReady(timeout)` — Polls SOCKS5 connectivity via `nodeFetch` to `api.ipify.org`, checks process is still alive
 - `stop()` — Kills the process and resets state
 - `isReady()` — Returns true when process is running and proxy agent is created
 - `getAgent()` — Returns `SocksProxyAgent` instance for use with `node-fetch`
+- `lastEndpoint` — Caches the last working WARP endpoint (IP:port) for reuse on restart
 - Used by `proxyChatRequest` when `accessTier === 'limited'` to route through Cloudflare WARP
 
 ### 7. Run Chain Helpers (lines 569-603)
@@ -118,7 +119,7 @@ Finalization:
 - `readBody(req)` — Reads full request body into string
 - `writeJSON(res, statusCode, payload)` — JSON response helper
 - `writeOpenAIError()` / `writeClaudeError()` — Error response formatters
-- `handleHealthz(req, res)` — Returns uptime, token states (with `country_code` and `remaining_ms`), model count, runtime info
+- `handleHealthz(req, res)` — Returns uptime, token states (with `country_code` and `remaining_ms`), model count, runtime info, and Warp Plus status (with `exit_country` when active)
 - `handleModels(req, res)` — OpenAI-format model list
 - `handleChatCompletions(req, res)` — Parses body, calls `proxyChatRequest`
 - `handleClaudeMessages(req, res)` — Converts Anthropic format, calls `proxyChatRequest`

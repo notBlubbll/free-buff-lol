@@ -280,7 +280,7 @@ Access the dashboard at `http://localhost:8080`:
 - **OAuth Token Generation** — Browser-based authentication with auto-polling
 - **Toggleable Models** — Enable/disable models with checkboxes
 - **Token Status** — View active tokens, sessions, instance IDs, country code, and remaining session time with live countdown
-- **Country Display** — Shows the upstream server's country code (e.g. `DE`) from the session response
+- **Country Display** — Shows the upstream server's country code (e.g. `DE`) from the session response, with `>US` indicator when Warp Plus proxy is active
 - **Session Countdown** — Live `Xm Ys left` countdown in the Auth Token Status header, updated every second
 - **Ad Integration** — Gravity ad provider with 30s rotation, impression tracking, toggleable display, and localStorage caching
 - **SS Mode** — Blur tokens for screenshots
@@ -390,6 +390,7 @@ If Warp Plus fails to start or the SOCKS5 proxy on port 8086 is not reachable:
 - The proxy automatically falls back to direct connection
 - Check if another process is using port 8086
 - The `warp-plus.exe` binary is downloaded automatically on first use
+- The last working WARP endpoint (IP:port) is cached and reused on restart; if connectivity fails, the cache is cleared and a new endpoint is fetched
 
 ### Model Lock Errors
 

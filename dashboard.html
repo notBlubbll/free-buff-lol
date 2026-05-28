@@ -958,9 +958,17 @@
         const tier = bestToken?.access_tier || '';
         const el = document.getElementById('countryCode');
         el.textContent = cc;
-        if (tier === 'limited') {
+        if (proxyData.opera_proxy && proxyData.opera_proxy.exit_country) {
+          const small = document.createElement('small');
+          small.textContent = '>' + proxyData.opera_proxy.exit_country;
+          small.style.marginLeft = '4px';
+          small.style.opacity = '0.7';
+          el.appendChild(small);
+        } else if (tier === 'limited') {
           const small = document.createElement('small');
           small.textContent = '(limit)';
+          small.style.marginLeft = '4px';
+          small.style.opacity = '0.7';
           el.appendChild(small);
         }
         if (cc !== '-') countryCodeSet = true;

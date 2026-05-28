@@ -415,6 +415,7 @@ class WarpPlusManager {
     this.ready = false;
     this.starting = false;
     this.proxyAgent = null;
+    this.lastEndpoint = null;
   }
 
   async ensureBinary() {
@@ -450,14 +451,23 @@ class WarpPlusManager {
     if (!hasBin) { this.starting = false; return false; }
     console.log(`[WarpPlus] Starting SOCKS5 proxy on port ${WARP_PLUS_PORT}...`);
     try {
-      this.process = spawn(WARP_PLUS_BIN, ['-b', `127.0.0.1:${WARP_PLUS_PORT}`, '-4'], {
+      const args = ['-b', `127.0.0.1:${WARP_PLUS_PORT}`, '-4'];
+      if (this.lastEndpoint) {
+        args.push('-e', this.lastEndpoint);
+        console.log(`[WarpPlus] Reusing cached endpoint: ${this.lastEndpoint}`);
+      }
+      this.process = spawn(WARP_PLUS_BIN, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         cwd: path.dirname(WARP_PLUS_BIN)
       });
       this.process.stdout.on('data', (d) => {
         const msg = d.toString().trim();
-        if (msg && !msg.includes('connection test failed')) console.log(`[WarpPlus] ${msg}`);
+        if (msg && !msg.includes('connection test failed')) {
+          console.log(`[WarpPlus] ${msg}`);
+          const epMatch = msg.match(/using warp endpoints.*?"\[(.+?)\]"/);
+          if (epMatch) this.lastEndpoint = epMatch[1].split(' ')[0].trim();
+        }
       });
       this.process.stderr.on('data', (d) => {
         const msg = d.toString().trim();
@@ -479,7 +489,7 @@ class WarpPlusManager {
       this.proxyAgent = new SocksProxyAgent(WARP_PLUS_ADDR);
       this.ready = true;
       this.starting = false;
-      console.log('[WarpPlus] Ready');
+      console.log(`[WarpPlus] Ready${this.lastEndpoint ? ' (endpoint: ' + this.lastEndpoint + ')' : ''}`);
       return true;
     } catch (e) {
       console.error('[WarpPlus] Failed to start:', e.message);
@@ -492,15 +502,16 @@ class WarpPlusManager {
   async _waitForReady(timeout) {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
+      if (!this.process || !this.process.pid) throw new Error('process died');
       try {
         const agent = new SocksProxyAgent(WARP_PLUS_ADDR);
         await nodeFetch('https://api.ipify.org?format=json', { agent, signal: AbortSignal.timeout(3000) });
-        break;
+        return;
       } catch {
-        if (this.process && !this.process.pid) throw new Error('process died');
         await new Promise(r => setTimeout(r, 1000));
       }
     }
+    throw new Error('readiness timeout');
   }
 
   stop() {
@@ -1072,7 +1083,8 @@ async function handleHealthz(req, res) {
     opera_proxy: {
       enabled: config.warpPlus,
       running: warpPlus.isReady(),
-      port: WARP_PLUS_PORT
+      port: WARP_PLUS_PORT,
+      exit_country: (warpPlus.isReady() || warpPlus.lastEndpoint) ? 'US' : null
     }
   });
 }
