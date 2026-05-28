@@ -1,14 +1,14 @@
 @echo off
 setlocal enabledelayedexpansion
 
-taskkill /F /FI "WINDOWTITLE eq Freebuff2API Proxy" /T >nul 2>&1
+taskkill /F /FI "WINDOWTITLE eq Frebuff2Opencode Proxy" /T >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-title Freebuff2API Proxy
+title Frebuff2Opencode Proxy
 cd /d "%~dp0"
 
 echo ==================================================
-echo  Freebuff2API Proxy
+echo  Frebuff2Opencode Proxy
 echo ==================================================
 echo.
 

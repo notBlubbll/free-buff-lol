@@ -184,6 +184,55 @@ function saveConfig(cfg) {
   }, null, 2));
 }
 
+function setupOpencodeConfig() {
+  const models = {};
+  for (const m of modelRegistry.getModels()) {
+    const short = m.split('/').pop();
+    models[m] = { name: short };
+  }
+  const providerEntry = {
+    npm: '@ai-sdk/openai-compatible',
+    name: 'Freebuff Proxy',
+    options: { baseURL: `http://localhost:${parseInt(config.listenAddr.replace(':', '')) || 8080}/v1` },
+    models
+  };
+
+  const configPaths = [
+    path.join(os.homedir(), '.config', 'opencode', 'opencode.json')
+  ];
+  if (process.platform === 'win32') {
+    configPaths.unshift(path.join(os.homedir(), '.opencode', 'opencode.json'));
+    const systemProfile = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'config', 'systemprofile', '.opencode', 'opencode.json');
+    try { if (fs.existsSync(path.dirname(systemProfile))) configPaths.push(systemProfile); } catch {}
+  }
+
+  for (const configFile of configPaths) {
+    try {
+      const dir = path.dirname(configFile);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      let existing = { $schema: 'https://opencode.ai/config.json' };
+      if (fs.existsSync(configFile)) {
+        existing = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+        const backupFile = path.join(dir, 'openconfig.b4freebuff.json');
+        if (!fs.existsSync(backupFile)) {
+          fs.copyFileSync(configFile, backupFile);
+          console.log(`[Opencode] Backup created: ${backupFile}`);
+        } else {
+          console.log(`[Opencode] Backup already exists: ${backupFile}`);
+        }
+      } else {
+        console.log(`[Opencode] No existing config found, will create: ${configFile}`);
+      }
+      if (!existing.provider || typeof existing.provider !== 'object') existing.provider = {};
+      existing.provider['freebuff'] = providerEntry;
+      fs.writeFileSync(configFile, JSON.stringify(existing, null, 2));
+      console.log(`[Opencode] Config updated: ${configFile}`);
+    } catch (e) {
+      console.error(`[Opencode] Failed to update ${configFile}: ${e.message}`);
+    }
+  }
+}
+
 // --- Model Registry ---
 class ModelRegistry {
   constructor() {
@@ -837,7 +886,7 @@ async function handleHealthz(req, res) {
 async function handleModels(req, res) {
   if (req.method !== 'GET') { writeOpenAIError(res, 405, 'method not allowed', 'invalid_request_error', ''); return; }
   const created = Math.floor(startTime.getTime() / 1000);
-  writeJSON(res, 200, { object: 'list', data: modelRegistry.getModels().map(m => ({ id: m, object: 'model', created, owned_by: 'Freebuff2API', root: m, permission: [] })) });
+  writeJSON(res, 200, { object: 'list', data: modelRegistry.getModels().map(m => ({ id: m, object: 'model', created, owned_by: 'Frebuff2Opencode', root: m, permission: [] })) });
 }
 
 async function handleChatCompletions(req, res) {
@@ -1263,7 +1312,7 @@ async function handleRequest(req, res) {
 // --- Server Startup ---
 async function startServer() {
   console.log('╔═══════════════════════════════════════════════════════════════╗');
-  console.log('║  Freebuff2API Proxy - Starting...                            ║');
+  console.log('║  Frebuff2Opencode Proxy - Starting...                            ║');
   console.log('╚═══════════════════════════════════════════════════════════════╝');
 
   try { config = loadConfig(); } catch (e) { console.error('Failed to load config:', e.message); process.exit(1); }
@@ -1278,6 +1327,8 @@ async function startServer() {
 
   modelRegistry = new ModelRegistry();
   await modelRegistry.start();
+
+  setupOpencodeConfig();
 
   const allTokenResults = await validateAllTokens();
   const validTokens = allTokenResults.filter(r => r.valid);
@@ -1298,7 +1349,7 @@ async function startServer() {
 
   const server = http.createServer(handleRequest);
   server.listen(port, '0.0.0.0', () => {
-    console.log(`\nFreebuff2API Proxy on http://0.0.0.0:${port}`);
+    console.log(`\nFrebuff2Opencode Proxy on http://0.0.0.0:${port}`);
     console.log(`  Upstream: ${config.upstreamBaseURL}`);
     console.log(`  Models: ${modelRegistry.getModels().length}`);
     console.log(`  API keys: ${config.apiKeys.length > 0 ? config.apiKeys.length + ' (auth enabled)' : 'none (open access)'}`);

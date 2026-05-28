@@ -1,14 +1,14 @@
 @echo off
 setlocal enabledelayedexpansion
 
-taskkill /F /FI "WINDOWTITLE eq Freebuff2API Proxy - Node.js Mode" /T >nul 2>&1
+taskkill /F /FI "WINDOWTITLE eq Frebuff2Opencode Proxy - Node.js Mode" /T >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-title Freebuff2API Proxy - Node.js Mode
+title Frebuff2Opencode Proxy - Node.js Mode
 cd /d "%~dp0"
 
 echo ==================================================
-echo  Freebuff2API Proxy - Node.js Mode
+echo  Frebuff2Opencode Proxy - Node.js Mode
 echo  Enforces Node.js (ignores Bun)
 echo ==================================================
 echo.
