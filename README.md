@@ -17,26 +17,6 @@ OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free acces
 - **Version Auto-Update** — Tracks Bun, Freebuff CLI, and SDK versions from upstream sources
 - **Auto-Config** — Automatically configures opencode provider on startup
 
-## What is Freebuff?
-
-Freebuff is the **free tier of [Codebuff](https://codebuff.com)** (operated by Manicode, Inc, DBA Codebuff). It provides free access to AI coding agents via a terminal CLI (`npm install -g freebuff`) without requiring a subscription. Authentication is done through GitHub OAuth.
-
-- **Website**: [freebuff.com](https://freebuff.com)
-- **Source code**: [github.com/CodebuffAI/codebuff](https://github.com/CodebuffAI/codebuff) (Apache 2.0)
-- **Paid tier**: [Codebuff](https://codebuff.com/pricing) — $100–$500/mo for Claude Opus 4.7, GPT-5.4, and higher usage limits
-
-> **Note**: This proxy is an unofficial third-party tool. It is not affiliated with or endorsed by Codebuff/Manicode, Inc.
-
-## What is Freebuff?
-
-Freebuff is the **free tier of [Codebuff](https://codebuff.com)** (operated by Manicode, Inc, DBA Codebuff). It provides free access to AI coding agents via a terminal CLI (`npm install -g freebuff`) without requiring a subscription. Authentication is done through GitHub OAuth.
-
-- **Website**: [freebuff.com](https://freebuff.com)
-- **Source code**: [github.com/CodebuffAI/codebuff](https://github.com/CodebuffAI/codebuff) (Apache 2.0)
-- **Paid tier**: [Codebuff](https://codebuff.com/pricing) — $100–$500/mo for Claude Opus 4.7, GPT-5.4, and higher usage limits
-
-> **Note**: This proxy is an unofficial third-party tool. It is not affiliated with or endorsed by Codebuff/Manicode, Inc.
-
 ## Available Models
 
 The proxy fetches models from Freebuff's TypeScript source. Current models:
@@ -47,6 +27,9 @@ The proxy fetches models from Freebuff's TypeScript source. Current models:
 | `moonshotai/kimi-k2.6` | `base2-free-kimi` | Premium | No |
 | `deepseek/deepseek-v4-pro` | `base2-free-deepseek` | Premium | **Yes** |
 | `deepseek/deepseek-v4-flash` | `base2-free-deepseek-flash` | Limited | **Yes** |
+| `google/gemini-3.1-pro-preview` | *(subagent only)* | — | No |
+
+The first 4 models are user-selectable in the dashboard. `google/gemini-3.1-pro-preview` is used internally as a subagent (gemini-thinker) when using Kimi K2.6 or DeepSeek V4 Pro for deeper reasoning — it is not directly accessible via the API.
 
 Models are toggleable in the dashboard UI.
 
@@ -74,69 +57,22 @@ They state they do not choose model providers that train on your data in standar
 
 ### Limited Mode
 
-Freebuff has a **limited access tier** that restricts users to a single model:
+Freebuff has two access tiers that determine which models you can use:
 
-- **Limited tier** can only use `deepseek/deepseek-v4-flash` (the model that collects data for training)
-- **Full tier** can use all 4 models
-- **Premium models** (`deepseek/deepseek-v4-pro`, `moonshotai/kimi-k2.6`) require premium access
+| Tier | Available Models | Session Limit |
+|------|-----------------|---------------|
+| **Limited** | `deepseek/deepseek-v4-flash` only | 5/day |
+| **Full** | All 4 models | 5/day |
 
-Session limits:
-- **5 sessions per day** (resets at midnight Pacific time)
-- Sessions enter a **waiting room queue** during high traffic
-- Sessions can be `active`, `queued`, `ended`, `superseded`, or `disabled`
+Within the full tier, two models are marked as **premium** and may require additional access:
+- `deepseek/deepseek-v4-pro` (Smartest) — Premium, **collects data for training**
+- `moonshotai/kimi-k2.6` (Balanced) — Premium
+- `minimax/minimax-m2.7` (Fastest) — Non-premium
+- `deepseek/deepseek-v4-flash` (Most efficient) — Non-premium, **collects data for training**
 
-The proxy handles these states automatically — queued sessions are polled until active, and ended/superseded sessions are recreated.
+New freebuff users typically start in **limited tier**, which only allows `deepseek/deepseek-v4-flash` — the model that collects data for training. To access all models, you need full tier access.
 
-### Supported Countries
-
-Freebuff is available **globally** in 85+ countries. The [live map](https://freebuff.com/live) shows real-time usage. Top countries include:
-
-| Country | Active Users |
-|---------|-------------|
-| India | 119 |
-| United States | 54 |
-| Germany | 29 |
-| Spain | 29 |
-| China | 22 |
-| Indonesia | 19 |
-| United Kingdom | 19 |
-| France | 18 |
-| Vietnam | 15 |
-| Canada | 12 |
-
-The proxy dashboard displays the upstream server's `country_code` (e.g. `DE`) from the session response. Availability may vary by region and time of day.
-
-## Warnings
-
-### Data Collection & Training
-
-**DeepSeek models collect your data for training.** The upstream Freebuff source explicitly marks both `deepseek/deepseek-v4-pro` and `deepseek/deepseek-v4-flash` with the warning: `"Collects data for training"`. This means your prompts, code, and chat content sent through these models may be used by DeepSeek to train their models.
-
-If you are working with sensitive, proprietary, or confidential code, **avoid DeepSeek models**. Use `minimax/minimax-m2.7` or `moonshotai/kimi-k2.6` instead — these do not carry the training data warning.
-
-### What Freebuff/Codebuff Collects
-
-Per their [Privacy Policy](https://codebuff.com/privacy-policy) and [Privacy docs](https://codebuff.com/docs/advanced/privacy):
-
-- **Chat session logs** are stored for debugging and service improvement
-- **Your codebase is not stored** — the server acts as a thin router forwarding requests to model providers
-- **Usage data**: IP address, browser type, device info, page visit duration
-- **Personal data**: email, name (if provided), cookies
-- **Analytics**: Google Analytics, PostHog, advertising cookies
-- **Data location**: transferred to and processed in the **United States**
-- **Ads**: session context and basic profile data are used for ad targeting
-
-They state they do not choose model providers that train on your data in standard modes — **but DeepSeek is an exception** (see above).
-
-### Limited Mode
-
-Freebuff has a **limited access tier** that restricts users to a single model:
-
-- **Limited tier** can only use `deepseek/deepseek-v4-flash` (the model that collects data for training)
-- **Full tier** can use all 4 models
-- **Premium models** (`deepseek/deepseek-v4-pro`, `moonshotai/kimi-k2.6`) require premium access
-
-Session limits:
+Session limits apply to both tiers:
 - **5 sessions per day** (resets at midnight Pacific time)
 - Sessions enter a **waiting room queue** during high traffic
 - Sessions can be `active`, `queued`, `ended`, `superseded`, or `disabled`
