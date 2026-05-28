@@ -187,8 +187,7 @@ function saveConfig(cfg) {
 function setupOpencodeConfig() {
   const models = {};
   for (const m of modelRegistry.getModels()) {
-    const short = m.split('/').pop();
-    models[m] = { name: short };
+    models[m] = { name: modelRegistry.getDisplayName(m) };
   }
   const providerEntry = {
     npm: '@ai-sdk/openai-compatible',
@@ -240,6 +239,7 @@ class ModelRegistry {
     this.modelToAgent = new Map();
     this.modelToParentAgent = new Map();
     this.modelToSessionModel = new Map();
+    this.modelDisplayNames = new Map();
     this.allModels = [];
     this.lastOK = null;
     this.refreshTimer = null;
@@ -267,6 +267,7 @@ class ModelRegistry {
       this.agentModels = agents;
       this.modelToAgent = modelToAgent;
       this.allModels = allModels;
+      this.modelDisplayNames = this.parseDisplayNames(modelsSource);
       this.lastOK = new Date();
       console.log(`Model registry: updated ${agents.size} agents, ${allModels.length} models: ${allModels.join(', ')}`);
     } catch (e) {
@@ -329,6 +330,66 @@ class ModelRegistry {
     }
     allModels.sort();
     return { modelToAgent, allModels };
+  }
+
+  parseDisplayNames(source) {
+    const map = new Map();
+    const blockPattern = /\{\s*id:\s*(?:FREEBUFF_\w+|'[^']*')[\s\S]*?displayName:\s*'([^']+)'/g;
+    const lines = source.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const idMatch = lines[i].match(/id:\s*(\w+|'[^']*')/);
+      if (!idMatch) continue;
+      let idRef = idMatch[1];
+      for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+        const dnMatch = lines[j].match(/displayName:\s*'([^']+)'/);
+        if (dnMatch) {
+          const id = idRef.startsWith("'") ? idRef.slice(1, -1) : idRef;
+          map.set(id, dnMatch[1]);
+          break;
+        }
+      }
+    }
+    const resolved = new Map();
+    const constPattern = /export const (\w+)\s*=\s*['"]([^'"]+)['"]/g;
+    let cm;
+    while ((cm = constPattern.exec(source)) !== null) {
+      if (map.has(cm[1])) resolved.set(cm[2], map.get(cm[1]));
+    }
+    return resolved;
+  }
+
+  getDisplayName(model) {
+    return this.modelDisplayNames.get(model) || model.split('/').pop();
+  }
+
+  parseDisplayNames(source) {
+    const map = new Map();
+    const blockPattern = /\{\s*id:\s*(?:FREEBUFF_\w+|'[^']*')[\s\S]*?displayName:\s*'([^']+)'/g;
+    const lines = source.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const idMatch = lines[i].match(/id:\s*(\w+|'[^']*')/);
+      if (!idMatch) continue;
+      let idRef = idMatch[1];
+      for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+        const dnMatch = lines[j].match(/displayName:\s*'([^']+)'/);
+        if (dnMatch) {
+          const id = idRef.startsWith("'") ? idRef.slice(1, -1) : idRef;
+          map.set(id, dnMatch[1]);
+          break;
+        }
+      }
+    }
+    const resolved = new Map();
+    const constPattern = /export const (\w+)\s*=\s*['"]([^'"]+)['"]/g;
+    let cm;
+    while ((cm = constPattern.exec(source)) !== null) {
+      if (map.has(cm[1])) resolved.set(cm[2], map.get(cm[1]));
+    }
+    return resolved;
+  }
+
+  getDisplayName(model) {
+    return this.modelDisplayNames.get(model) || model.split('/').pop();
   }
 
   getModels() { return [...this.allModels]; }
