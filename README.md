@@ -17,18 +17,150 @@ OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free acces
 - **Version Auto-Update** — Tracks Bun, Freebuff CLI, and SDK versions from upstream sources
 - **Auto-Config** — Automatically configures opencode provider on startup
 
+## What is Freebuff?
+
+Freebuff is the **free tier of [Codebuff](https://codebuff.com)** (operated by Manicode, Inc, DBA Codebuff). It provides free access to AI coding agents via a terminal CLI (`npm install -g freebuff`) without requiring a subscription. Authentication is done through GitHub OAuth.
+
+- **Website**: [freebuff.com](https://freebuff.com)
+- **Source code**: [github.com/CodebuffAI/codebuff](https://github.com/CodebuffAI/codebuff) (Apache 2.0)
+- **Paid tier**: [Codebuff](https://codebuff.com/pricing) — $100–$500/mo for Claude Opus 4.7, GPT-5.4, and higher usage limits
+
+> **Note**: This proxy is an unofficial third-party tool. It is not affiliated with or endorsed by Codebuff/Manicode, Inc.
+
+## What is Freebuff?
+
+Freebuff is the **free tier of [Codebuff](https://codebuff.com)** (operated by Manicode, Inc, DBA Codebuff). It provides free access to AI coding agents via a terminal CLI (`npm install -g freebuff`) without requiring a subscription. Authentication is done through GitHub OAuth.
+
+- **Website**: [freebuff.com](https://freebuff.com)
+- **Source code**: [github.com/CodebuffAI/codebuff](https://github.com/CodebuffAI/codebuff) (Apache 2.0)
+- **Paid tier**: [Codebuff](https://codebuff.com/pricing) — $100–$500/mo for Claude Opus 4.7, GPT-5.4, and higher usage limits
+
+> **Note**: This proxy is an unofficial third-party tool. It is not affiliated with or endorsed by Codebuff/Manicode, Inc.
+
 ## Available Models
 
 The proxy fetches models from Freebuff's TypeScript source. Current models:
 
-| Model | Agent ID |
-|-------|----------|
-| `minimax/minimax-m2.7` | `base2-free` |
-| `moonshotai/kimi-k2.6` | `base2-free-kimi` |
-| `deepseek/deepseek-v4-pro` | `base2-free-deepseek` |
-| `deepseek/deepseek-v4-flash` | `base2-free-deepseek-flash` |
+| Model | Agent ID | Tier | Data Training |
+|-------|----------|------|---------------|
+| `minimax/minimax-m2.7` | `base2-free` | Full | No |
+| `moonshotai/kimi-k2.6` | `base2-free-kimi` | Premium | No |
+| `deepseek/deepseek-v4-pro` | `base2-free-deepseek` | Premium | **Yes** |
+| `deepseek/deepseek-v4-flash` | `base2-free-deepseek-flash` | Limited | **Yes** |
 
 Models are toggleable in the dashboard UI.
+
+## Warnings
+
+### Data Collection & Training
+
+**DeepSeek models collect your data for training.** The upstream Freebuff source explicitly marks both `deepseek/deepseek-v4-pro` and `deepseek/deepseek-v4-flash` with the warning: `"Collects data for training"`. This means your prompts, code, and chat content sent through these models may be used by DeepSeek to train their models.
+
+If you are working with sensitive, proprietary, or confidential code, **avoid DeepSeek models**. Use `minimax/minimax-m2.7` or `moonshotai/kimi-k2.6` instead — these do not carry the training data warning.
+
+### What Freebuff/Codebuff Collects
+
+Per their [Privacy Policy](https://codebuff.com/privacy-policy) and [Privacy docs](https://codebuff.com/docs/advanced/privacy):
+
+- **Chat session logs** are stored for debugging and service improvement
+- **Your codebase is not stored** — the server acts as a thin router forwarding requests to model providers
+- **Usage data**: IP address, browser type, device info, page visit duration
+- **Personal data**: email, name (if provided), cookies
+- **Analytics**: Google Analytics, PostHog, advertising cookies
+- **Data location**: transferred to and processed in the **United States**
+- **Ads**: session context and basic profile data are used for ad targeting
+
+They state they do not choose model providers that train on your data in standard modes — **but DeepSeek is an exception** (see above).
+
+### Limited Mode
+
+Freebuff has a **limited access tier** that restricts users to a single model:
+
+- **Limited tier** can only use `deepseek/deepseek-v4-flash` (the model that collects data for training)
+- **Full tier** can use all 4 models
+- **Premium models** (`deepseek/deepseek-v4-pro`, `moonshotai/kimi-k2.6`) require premium access
+
+Session limits:
+- **5 sessions per day** (resets at midnight Pacific time)
+- Sessions enter a **waiting room queue** during high traffic
+- Sessions can be `active`, `queued`, `ended`, `superseded`, or `disabled`
+
+The proxy handles these states automatically — queued sessions are polled until active, and ended/superseded sessions are recreated.
+
+### Supported Countries
+
+Freebuff is available **globally** in 85+ countries. The [live map](https://freebuff.com/live) shows real-time usage. Top countries include:
+
+| Country | Active Users |
+|---------|-------------|
+| India | 119 |
+| United States | 54 |
+| Germany | 29 |
+| Spain | 29 |
+| China | 22 |
+| Indonesia | 19 |
+| United Kingdom | 19 |
+| France | 18 |
+| Vietnam | 15 |
+| Canada | 12 |
+
+The proxy dashboard displays the upstream server's `country_code` (e.g. `DE`) from the session response. Availability may vary by region and time of day.
+
+## Warnings
+
+### Data Collection & Training
+
+**DeepSeek models collect your data for training.** The upstream Freebuff source explicitly marks both `deepseek/deepseek-v4-pro` and `deepseek/deepseek-v4-flash` with the warning: `"Collects data for training"`. This means your prompts, code, and chat content sent through these models may be used by DeepSeek to train their models.
+
+If you are working with sensitive, proprietary, or confidential code, **avoid DeepSeek models**. Use `minimax/minimax-m2.7` or `moonshotai/kimi-k2.6` instead — these do not carry the training data warning.
+
+### What Freebuff/Codebuff Collects
+
+Per their [Privacy Policy](https://codebuff.com/privacy-policy) and [Privacy docs](https://codebuff.com/docs/advanced/privacy):
+
+- **Chat session logs** are stored for debugging and service improvement
+- **Your codebase is not stored** — the server acts as a thin router forwarding requests to model providers
+- **Usage data**: IP address, browser type, device info, page visit duration
+- **Personal data**: email, name (if provided), cookies
+- **Analytics**: Google Analytics, PostHog, advertising cookies
+- **Data location**: transferred to and processed in the **United States**
+- **Ads**: session context and basic profile data are used for ad targeting
+
+They state they do not choose model providers that train on your data in standard modes — **but DeepSeek is an exception** (see above).
+
+### Limited Mode
+
+Freebuff has a **limited access tier** that restricts users to a single model:
+
+- **Limited tier** can only use `deepseek/deepseek-v4-flash` (the model that collects data for training)
+- **Full tier** can use all 4 models
+- **Premium models** (`deepseek/deepseek-v4-pro`, `moonshotai/kimi-k2.6`) require premium access
+
+Session limits:
+- **5 sessions per day** (resets at midnight Pacific time)
+- Sessions enter a **waiting room queue** during high traffic
+- Sessions can be `active`, `queued`, `ended`, `superseded`, or `disabled`
+
+The proxy handles these states automatically — queued sessions are polled until active, and ended/superseded sessions are recreated.
+
+### Supported Countries
+
+Freebuff is available **globally** in 85+ countries. The [live map](https://freebuff.com/live) shows real-time usage. Top countries include:
+
+| Country | Active Users |
+|---------|-------------|
+| India | 119 |
+| United States | 54 |
+| Germany | 29 |
+| Spain | 29 |
+| China | 22 |
+| Indonesia | 19 |
+| United Kingdom | 19 |
+| France | 18 |
+| Vietnam | 15 |
+| Canada | 12 |
+
+The proxy dashboard displays the upstream server's `country_code` (e.g. `DE`) from the session response. Availability may vary by region and time of day.
 
 ## Authentication
 
@@ -101,6 +233,39 @@ Edit `.config/config.json` or set environment variables:
 | `API_KEYS` | Client API keys for proxy auth | `[]` (open access) |
 
 Environment variables override JSON config values.
+
+### Setting Up API Keys
+
+By default the proxy is open access — any client can connect. To restrict access, set `API_KEYS` in `.config/config.json`:
+
+```json
+{
+  "API_KEYS": ["my-secret-key-1", "my-secret-key-2"]
+}
+```
+
+Or via environment variable (comma-separated):
+
+```bash
+set API_KEYS=my-secret-key-1,my-secret-key-2
+node proxy.js
+```
+
+Clients must then include the key in requests:
+
+```bash
+# Using x-api-key header
+curl -H "x-api-key: my-secret-key-1" http://localhost:8080/v1/models
+
+# Using Authorization header
+curl -H "Authorization: Bearer my-secret-key-1" http://localhost:8080/v1/models
+```
+
+Generate a random key:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
 
 ## Usage
 
@@ -278,6 +443,7 @@ Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 
 ## Credits
 
+- Inspired by [freebuff-proxy](https://github.com/ferdiunal/freebuff-proxy) by ferdiunal
 - Original Go implementation: [Freebuff2API](https://github.com/Quorinex/Freebuff2API) by Quorinex
 - Freebuff and Codebuff for the backend API
 - [freebuff2api_rs](https://github.com/XxxXTeam/freebuff2api_rs) for version tracking
