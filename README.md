@@ -5,9 +5,14 @@ OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free acces
 <img width="875" height="610" alt="image" src="https://github.com/user-attachments/assets/87d0a282-f32c-4b34-8ea5-6c52ab70ec3d" />
 
 
+
 <img width="653" height="442" alt="image" src="https://github.com/user-attachments/assets/be4a5a3e-64f9-49c1-8ae1-0a0a52ad85cd" />
 
-<img width="256" height="167" alt="image" src="https://github.com/user-attachments/assets/10b90548-897b-409f-afbd-e4a3de7b2a98" />
+models:
+<img width="239" height="166" alt="image" src="https://github.com/user-attachments/assets/90e71da4-d894-4327-be83-37856118b61a" />
+
+country detection + bypass:
+<img width="309" height="196" alt="image" src="https://github.com/user-attachments/assets/49dee7f4-41a7-41ca-977e-b7b716d01a84" />
 
 
 ## Features
