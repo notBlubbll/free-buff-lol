@@ -164,8 +164,17 @@ function loadFreebuffCLITokens() {
   return tokens;
 }
 
+let configBackupDone = false;
 function saveConfig(cfg) {
   const configPath = path.join(__dirname, '.config', 'config.json');
+  const backupPath = path.join(__dirname, '.config', 'config.backup.json');
+  if (!configBackupDone && !fs.existsSync(backupPath)) {
+    try {
+      fs.copyFileSync(configPath, backupPath);
+      console.log('Initial config backup created:', backupPath);
+    } catch (e) { console.error('Failed to create config backup:', e.message); }
+    configBackupDone = true;
+  }
   fs.writeFileSync(configPath, JSON.stringify({
     LISTEN_ADDR: cfg.listenAddr,
     UPSTREAM_BASE_URL: cfg.upstreamBaseURL,
