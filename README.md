@@ -1,6 +1,6 @@
 # Frebuff2Opencode Proxy
 
-OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free access to multiple LLM models through a unified API. Translated from the Go implementation [Frebuff2Opencode](https://github.com/Quorinex/Frebuff2Opencode) to Node.js/Bun.
+OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free access to multiple LLM models through a unified API. Translated from the Go implementation [Frebuff2Opencode](https://github.com/Quorinex/Freebuff2API) to Node.js/Bun.
 
 <img width="875" height="610" alt="image" src="https://github.com/user-attachments/assets/87d0a282-f32c-4b34-8ea5-6c52ab70ec3d" />
 
