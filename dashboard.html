@@ -769,7 +769,7 @@
         }
         let sessionInfo = '';
         if (pool.session_instance_id) {
-          sessionInfo = `<div style="margin-top:8px;font-size:0.8rem;color:#8b949e;" class="${blurClass}">Session: ${pool.session_instance_id.substring(0,12)}...${pool.session_expires_at ? ' | Expires: ' + new Date(pool.session_expires_at).toLocaleTimeString() : ''}</div>`;
+          sessionInfo = `<div style="margin-top:8px;font-size:0.8rem;color:#000000;" class="${blurClass}">Session: ${pool.session_instance_id.substring(0,12)}...${pool.session_expires_at ? ' | Expires: ' + new Date(pool.session_expires_at).toLocaleTimeString() : ''}</div>`;
         }
         return `<div class="pool-card"><div class="pool-header"><div class="pool-name">${pool.name}</div><div class="pool-status ${statusClass}">${statusText}</div></div>${runsHtml}${sessionInfo}${pool.last_error ? `<div class="text-danger" style="margin-top:8px;font-size:0.8rem;">${pool.last_error}</div>` : ''}</div>`;
       }).join('');
