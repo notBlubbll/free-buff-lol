@@ -26,6 +26,16 @@ let AI_SDK_PROVIDER_UTILS_VERSION = '3.0.20';
 let FREEBUFF_CLI_VERSION = '0.0.96';
 let DETECTED_COUNTRY = null;
 
+let LAST_REQUEST = 0;
+async function debounceRequest() {
+  const now = Date.now();
+  const elapsed = now - LAST_REQUEST;
+  if (elapsed < 1300) {
+    await new Promise(r => setTimeout(r, 1300 - elapsed));
+  }
+  LAST_REQUEST = Date.now();
+}
+
 const CANONICAL_MODEL_ALIASES = {
   'deepseek-v4-pro': 'deepseek/deepseek-v4-pro',
   'deepseek-v4-flash': 'deepseek/deepseek-v4-flash',
@@ -1309,6 +1319,27 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
       }
     }
 
+    if (resp.status === 429) {
+      const errorBodyStr = await readBodyText(resp.body);
+      console.log(`[Rate Limit] 429: ${errorBodyStr.substring(0, 200)}`);
+      for (let retry = 0; retry < 3; retry++) {
+        const waitMs = (retry + 1) * 3000;
+        console.log(`[Rate Limit] Waiting ${waitMs / 1000}s before retry ${retry + 1}/3...`);
+        await new Promise(r => setTimeout(r, waitMs));
+        try { resp = await client.chatCompletions(token, cloned, proxyAgent); } catch (e) {
+          writeError(res, 502, e.message, 'server_error', '');
+          return;
+        }
+        if (resp.status !== 429) break;
+        console.log(`[Rate Limit] Still 429 on retry ${retry + 1}`);
+      }
+      if (resp.status === 429) {
+        const finalBody = await readBodyText(resp.body);
+        writeUpstreamError(res, 429, finalBody);
+        return;
+      }
+    }
+
     if (resp.status >= 200 && resp.status < 300) {
       let messageId = null;
       try { messageId = await writeSuccess(res, resp); } catch (e) { console.error(`proxy response copy failed: ${e.message}`); }
@@ -1557,6 +1588,7 @@ async function reloadTokenPool() {
 
 // --- Main Request Handler ---
 async function handleRequest(req, res) {
+  await debounceRequest();
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
 

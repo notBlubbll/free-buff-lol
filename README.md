@@ -30,6 +30,8 @@ country detection + bypass:<br>
 - **Version Auto-Update** — Tracks Bun, Freebuff CLI, and SDK versions from upstream sources
 - **Auto-Config** — Automatically configures opencode provider on startup
 - **Warp Plus Proxy** — SOCKS5 proxy via Cloudflare WARP for bypassing rate limits on limited-tier sessions
+- **Request Debounce** — Global 1.3s minimum gap between requests to prevent upstream rate limiting
+- **429 Retry** — Automatic retry on rate limit errors (3 attempts with progressive delay: 3s, 6s, 9s)
 
 ## Available Models
 
@@ -41,9 +43,20 @@ The proxy fetches models from Freebuff's TypeScript source. Current models:
 | `moonshotai/kimi-k2.6` | `base2-free-kimi` | Premium | No |
 | `deepseek/deepseek-v4-pro` | `base2-free-deepseek` | Premium | **Yes** |
 | `deepseek/deepseek-v4-flash` | `base2-free-deepseek-flash` | Limited | **Yes** |
+| `mimo/mimo-v2.5-pro` | `base2-free` | Premium | No |
+| `mimo/mimo-v2.5` | `base2-free` | — | No |
 | `google/gemini-3.1-pro-preview` | *(subagent only)* | — | No |
 
-The first 4 models are user-selectable in the dashboard. `google/gemini-3.1-pro-preview` is used internally as a subagent (gemini-thinker) when using Kimi K2.6 or DeepSeek V4 Pro for deeper reasoning — it is not directly accessible via the API.
+The first 5 models are user-selectable in the dashboard. `google/gemini-3.1-pro-preview` is used internally as a subagent (gemini-thinker) when using Kimi K2.6 or DeepSeek V4 Pro for deeper reasoning — it is not directly accessible via the API.
+
+Shortcuts (auto-resolve to full model name):
+- `deepseek-v4-pro` → `deepseek/deepseek-v4-pro`
+- `deepseek-v4-flash` → `deepseek/deepseek-v4-flash`
+- `deepseek-v3.1-terminus` → `deepseek/deepseek-v4-pro`
+- `mimo-v2.5-pro` → `mimo/mimo-v2.5-pro`
+- `mimo-v2.5` → `mimo/mimo-v2.5`
+- `kimi-k2.6` → `moonshotai/kimi-k2.6`
+- `minimax-m2.7` → `minimax/minimax-m2.7`
 
 Models are toggleable in the dashboard UI.
 
@@ -76,13 +89,17 @@ Freebuff has two access tiers that determine which models you can use:
 | Tier | Available Models | Session Limit |
 |------|-----------------|---------------|
 | **Limited** | `deepseek/deepseek-v4-flash` only | 5/day |
-| **Full** | All 4 models | 5/day |
+| **Full** | All 5 models | 5/day |
+
+Both tiers share the same session limit: **5 sessions per day**, resetting at **midnight Pacific time**.
 
 Within the full tier, two models are marked as **premium** and may require additional access:
 - `deepseek/deepseek-v4-pro` (Smartest) — Premium, **collects data for training**
 - `moonshotai/kimi-k2.6` (Balanced) — Premium
+- `mimo/mimo-v2.5-pro` — Premium
 - `minimax/minimax-m2.7` (Fastest) — Non-premium
 - `deepseek/deepseek-v4-flash` (Most efficient) — Non-premium, **collects data for training**
+- `mimo/mimo-v2.5` — Non-premium
 
 New freebuff users typically start in **limited tier**, which only allows `deepseek/deepseek-v4-flash` — the model that collects data for training. To access all models, you need full tier access.
 
@@ -90,12 +107,20 @@ When the upstream returns a `session_model_mismatch` error (e.g., requesting `mi
 
 For limited-tier sessions, the proxy also attempts to route requests through a **Warp Plus** SOCKS5 proxy (Cloudflare WARP) to bypass rate limits. If Warp Plus fails to start or connect, the proxy falls back to direct connection.
 
-Session limits apply to both tiers:
-- **5 sessions per day** (resets at midnight Pacific time)
-- Sessions enter a **waiting room queue** during high traffic
-- Sessions can be `active`, `queued`, `ended`, `superseded`, or `disabled`
+### Deployment Hours
 
-The proxy handles these states automatically — queued sessions are polled until active, and ended/superseded sessions are recreated.
+Models are available during deployment hours: **9am ET to 5pm PT every day**. Outside these hours, requests may be rejected or routed to the fallback model (`minimax/minimax-m2.7`).
+
+### Session States
+
+Sessions can be in various states:
+- `active` — Ready to use
+- `queued` — Waiting in queue (polled until active)
+- `ended` — Session expired (proxy auto-recreates)
+- `superseded` — Replaced by a newer session (proxy auto-recreates)
+- `disabled` — No session needed
+
+The proxy handles all these states automatically — queued sessions are polled until active, and ended/superseded sessions are recreated transparently.
 
 ### Supported Countries
 
@@ -287,7 +312,7 @@ Access the dashboard at `http://localhost:8080`:
 - **Token Status** — View active tokens, sessions, instance IDs, country code, and remaining session time with live countdown
 - **Country Display** — Shows the upstream server's country code (e.g. `DE`) from the session response, with `>US` indicator when Warp Plus proxy is active
 - **Session Countdown** — Live `Xm Ys left` countdown in the Auth Token Status header, updated every second
-- **Ad Integration** — Gravity ad provider with 30s rotation, impression tracking, toggleable display, and localStorage caching
+- **Ad Integration** — Gravity ad provider via upstream `/api/v1/ads` (surface: `waiting_room`), 30s rotation, impression tracking (`/api/v1/ads/impression`), toggleable display (checkbox in dashboard), and localStorage caching
 - **SS Mode** — Blur tokens for screenshots
 - **Configuration Forms** — Edit listen address, upstream URL, timeouts
 

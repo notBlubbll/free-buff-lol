@@ -23,6 +23,7 @@ FREEBUFF-PROXY/
 - Version constants: `BUN_VERSION`, `FREEBUFF_CLI_VERSION`, `AI_SDK_COMPAT_VERSION`
 - `CANONICAL_MODEL_ALIASES` — Maps shorthand model names to full IDs (e.g. `deepseek-v4-pro` → `deepseek/deepseek-v4-pro`)
 - `FALLBACK_AGENT_IDS` — Hardcoded model-to-agent mapping when registry unavailable
+- `LAST_REQUEST` / `debounceRequest()` — Global request debounce (1.3s minimum gap between requests)
 - `checkAndUpdateVersions()` — Fetches `freebuff2api_rs` source and npm registry to auto-update version strings
 - User-Agent generators: `getApiUserAgent()`, `getChatUserAgent()`, `getAdsUserAgent()`
 
@@ -133,9 +134,10 @@ Finalization:
   6. Normalize tool schemas
   7. Forward to upstream
   8. Handle success (streaming or non-streaming)
-  9. On error: invalidate session or retry if run expired
-  10. On `session_model_mismatch`: switch to locked model (`deepseek/deepseek-v4-flash`) and retry
-  11. On Warp Plus failure: test SOCKS5 connectivity, fall back to direct connection
+  9. On 429: retry up to 3 times with progressive delay (3s, 6s, 9s)
+  10. On error: invalidate session or retry if run expired
+  11. On `session_model_mismatch`: switch to locked model (`deepseek/deepseek-v4-flash`) and retry
+  12. On Warp Plus failure: test SOCKS5 connectivity, fall back to direct connection
 - `writeOpenAISuccessResponse()` — Pipes SSE stream or copies full response
 - `writeClaudeSuccessResponse()` — Streams SSE or converts non-stream response to Anthropic format
 
@@ -224,6 +226,8 @@ Ready
 
 ```
 Client request arrives
+    ↓
+DebounceRequest() — enforce 1.3s minimum gap
     ↓
 Check API key authorization (if configured)
     ↓
@@ -369,6 +373,9 @@ Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 | Token reload check | 5 minutes |
 | Version check | 1 hour |
 | Request timeout | 15 minutes |
+| Request debounce | 1.3 seconds |
+| 429 retry attempts | 3 |
+| 429 retry delays | 3s, 6s, 9s |
 | Session poll max iterations | 60 |
 | Session poll delay | 250ms-2s |
 | Health check (dashboard) | 5 seconds |
@@ -388,7 +395,7 @@ Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 - [ ] WebSocket support for streaming
 - [ ] Token expiration detection
 - [ ] Automatic token refresh
-- [ ] Rate limiting
+- [x] Rate limiting — Global 1.3s debounce + 429 retry with progressive backoff
 - [ ] Request/response logging
 - [ ] Metrics export (Prometheus)
 - [ ] Docker containerization
