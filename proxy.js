@@ -167,7 +167,8 @@ function loadConfig() {
     authTokens: [...new Set(rawConfig.AUTH_TOKENS || [])],
     requestTimeout,
     apiKeys: [...new Set(rawConfig.API_KEYS || [])],
-    warpPlus: rawConfig.WARP_PLUS !== false
+    warpPlus: rawConfig.WARP_PLUS !== false,
+    disabledModels: Array.isArray(rawConfig.DISABLED_MODELS) ? rawConfig.DISABLED_MODELS : []
   };
 }
 
@@ -263,7 +264,8 @@ function saveConfig(cfg) {
     UPSTREAM_BASE_URL: cfg.upstreamBaseURL,
     AUTH_TOKENS: cfg.authTokens,
     REQUEST_TIMEOUT: `${cfg.requestTimeout / (60 * 1000)}m`,
-    API_KEYS: cfg.apiKeys
+    API_KEYS: cfg.apiKeys,
+    DISABLED_MODELS: cfg.disabledModels || []
   }, null, 2));
 }
 
@@ -1588,7 +1590,6 @@ async function reloadTokenPool() {
 
 // --- Main Request Handler ---
 async function handleRequest(req, res) {
-  await debounceRequest();
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
 
@@ -1696,8 +1697,8 @@ async function handleRequest(req, res) {
 
   if (pathname === '/healthz') { await handleHealthz(req, res); return; }
   if (pathname === '/v1/models') { await handleModels(req, res); return; }
-  if (pathname === '/v1/chat/completions') { await handleChatCompletions(req, res); return; }
-  if (pathname === '/v1/messages') { await handleClaudeMessages(req, res); return; }
+  if (pathname === '/v1/chat/completions') { await debounceRequest(); await handleChatCompletions(req, res); return; }
+  if (pathname === '/v1/messages') { await debounceRequest(); await handleClaudeMessages(req, res); return; }
   if (pathname === '/v1/messages/count_tokens') { await handleClaudeCountTokens(req, res); return; }
 
   res.writeHead(404, { 'Content-Type': 'text/plain' });

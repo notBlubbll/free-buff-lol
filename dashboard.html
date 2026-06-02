@@ -261,6 +261,104 @@
     .model-tag input[type="checkbox"] {
       pointer-events: none;
     }
+    .ad-card {
+      padding: 0 .5rem;
+      position: relative;
+      cursor: default;
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .ad-glass-box {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+    }
+    .ad-glass-inner {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      position: relative;
+      overflow: hidden;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.5);
+      border: 1px solid rgba(255,255,255,0.15);
+      padding: 10px 12px;
+      backdrop-filter: blur(13px);
+      -webkit-backdrop-filter: blur(13px);
+    }
+    .ad-arrow {
+      flex-shrink: 0;
+      width: 32px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.15);
+      border: none;
+      color: rgba(0,0,0,0.35);
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s ease, background 0.15s ease;
+      padding: 0;
+      line-height: 1;
+      backdrop-filter: blur(13px);
+      -webkit-backdrop-filter: blur(13px);
+    }
+    .ad-arrow:hover {
+      color: rgba(0,0,0,0.7);
+    }
+    .ad-arrow-left { margin-right: 4px; }
+    .ad-arrow-right { margin-left: 4px; }
+    #adSlidesContainer {
+      display: grid;
+    }
+    #adSlidesContainer > * {
+      grid-row: 1;
+      grid-column: 1;
+    }
+    .ad-slide {
+      opacity: 0;
+      pointer-events: none;
+      visibility: hidden;
+    }
+    .ad-slide.active {
+      opacity: 1;
+      pointer-events: auto;
+      visibility: visible;
+    }
+    .ad-dot {
+      cursor: pointer;
+      padding: 4px;
+    }
+    .ad-dot .dot-indicator {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.2);
+      transition: background 0.2s ease, transform 0.2s ease;
+    }
+    .ad-dot.active .dot-indicator {
+      background: rgba(0,0,0,0.7);
+      transform: scale(1.3);
+    }
+    .ad-header-bar {
+      position: absolute;
+      top: 2px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      pointer-events: none;
+    }
+    .ad-header-bar .ad-label {
+      font-size: 9px;
+      color: rgba(255,255,255,0.7);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
   </style>
 </head>
 <body>
@@ -289,7 +387,24 @@
     </div>
 
     <div class="row text-center d-flex align-items-stretch mb-3">
-      <div class="col-12 col-md-8"><div class="stats-card card h-100 d-flex flex-column" data-glass><div class="card-content flex-grow-1 d-flex flex-column justify-content-center" id="tokenCardContent" style="padding:10px;background:rgba(255,255,255,0.5);position:relative;cursor:default"><div style="position:absolute;top:3px;right:6px;font-size:7px;color:#000;text-transform:uppercase;letter-spacing:1px">Ad 1/4</div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><img src="https://t2.gstatic.com/faviconV2?client=SOCIAL&amp;type=FAVICON&amp;fallback_opts=TYPE,SIZE,URL&amp;url=https%3A%2F%2Fdatadoghq.com&amp;size=128" alt="Datadog" style="width:40px;height:40px;border-radius:6px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,0.15)"><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:12px;color:#0d1117;margin-bottom:1px;text-align:left">Datadog</div><div style="font-size:10px;color:rgba(13,17,23,0.5);line-height:1.3;text-align:left">Stop missing critical issues between CloudWatch's 5-minute intervals. Datadog delivers real-time AWS monitoring with 15-second metric granularity and retains data for 15 months. Get 1,000+ integrations with deeper insights than AWS natively collects.</div></div><a href="https://zero.click/e1a368a8-d63b-4a70-ba1f-a94cdb4b269a" target="_blank" rel="noopener sponsored" style="background:rgba(13,17,23,0.1);border:1px solid rgba(13,17,23,0.2);color:#0d1117;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:600;white-space:nowrap;flex-shrink:0;text-decoration:none">Compare Now</a></div></div></div></div>
+      <div class="col-12 col-md-8">
+        <div class="card h-100 d-flex flex-column" data-glass>
+          <div class="glass-panel"></div>
+          <div class="ad-card card-content flex-grow-1 d-flex flex-column">
+            <div class="ad-header-bar">
+              <span class="ad-label" id="adCounterLabel">Ad</span>
+            </div>
+            <div class="ad-glass-box">
+              <button class="ad-arrow ad-arrow-left" onclick="prevAd()" title="Previous ad"><i class="bi bi-chevron-left"></i></button>
+              <div class="ad-glass-inner">
+                <div id="adSlidesContainer"></div>
+              </div>
+              <button class="ad-arrow ad-arrow-right" onclick="nextAd()" title="Next ad"><i class="bi bi-chevron-right"></i></button>
+            </div>
+            <div id="adDots" style="display:flex;justify-content:center;gap:4px;margin-top:6px"></div>
+          </div>
+        </div>
+      </div>
       <div class="col-6 col-md-2"><div class="stats-card card h-100 d-flex flex-column" data-glass><div class="card-content flex-grow-1 justify-content-center align-items-center d-flex flex-column" style="padding:10px"><div class="stats-value" id="totalModels">0</div><div class="stats-label">Models</div></div></div></div>
       <div class="col-6 col-md-2"><div class="stats-card card h-100 d-flex flex-column" data-glass><div class="card-content flex-grow-1 justify-content-center align-items-center d-flex flex-column" style="padding:10px"><div class="stats-value" id="countryCode">-</div><div class="stats-label">Country</div></div></div></div>
     </div>
@@ -373,16 +488,17 @@
                 <small class="text-muted">Started At</small>
                 <div class="fw-medium" id="startedAt">-</div>
               </div>
-              <div class="mb-2">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" id="adsToggle" checked onchange="toggleAds(this.checked)">
-                  <label class="form-check-label text-muted" for="adsToggle" style="cursor:pointer">Show Ads</label>
-                </div>
-              </div>
+
               <div class="mb-2">
                 <div class="form-check form-switch">
                   <input class="form-check-input" type="checkbox" id="wallpaperToggle" onchange="toggleWallpaper()">
                   <label class="form-check-label text-muted" for="wallpaperToggle" style="cursor:pointer">Enable Wallpaper</label>
+                </div>
+              </div>
+              <div class="mb-2">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="adsToggleEnv" checked onchange="toggleAds(this.checked)">
+                  <label class="form-check-label text-muted" for="adsToggleEnv" style="cursor:pointer">Show Ads</label>
                 </div>
               </div>
               <div class="mb-2">
@@ -584,6 +700,7 @@
     let proxyData = null;
     let config = {};
     let models = [];
+    let disabledModels = [];
     let blurTokensEnabled = false;
     let oauthSession = null;
     let oauthPollTimer = null;
@@ -641,12 +758,21 @@
     function toggleAds(checked) {
       adsEnabled = checked;
       try { localStorage.setItem('adsEnabled', checked); } catch (e) {}
-      const card = document.getElementById('tokenCardContent');
-      if (!card) return;
+      const toggleEnv = document.getElementById('adsToggleEnv');
+      if (toggleEnv) toggleEnv.checked = checked;
       if (!checked) {
-        card.innerHTML = '<div style="font-size:12px;color:rgba(13,17,23,0.4)">Ads disabled</div>';
+        const slidesContainer = document.getElementById('adSlidesContainer');
+        const dotsContainer = document.getElementById('adDots');
+        const counterLabel = document.getElementById('adCounterLabel');
+        if (slidesContainer) slidesContainer.innerHTML = '<div style="font-size:12px;color:rgba(13,17,23,0.4);text-align:center;padding:12px 0">Ads disabled</div>';
+        if (dotsContainer) dotsContainer.innerHTML = '';
+        if (counterLabel) counterLabel.textContent = 'Ads off';
+        const arrows = document.querySelectorAll('.ad-arrow');
+        arrows.forEach(a => a.style.display = 'none');
       } else {
-        fetchAds().then(() => renderAdInTokenCard());
+        const arrows = document.querySelectorAll('.ad-arrow');
+        arrows.forEach(a => a.style.display = '');
+        fetchAds().then(() => { renderAdInTokenCard(); setTimeout(() => initLiquidGlass(), 100); });
       }
     }
 
@@ -671,6 +797,7 @@
             adImpUrl: ad.impUrl || ad.impressionUrl || ad.pixelUrl || ''
           }));
           currentAdIdx = 0;
+          adImpressionSent.clear();
           try { localStorage.setItem('_cachedAds', JSON.stringify(adsList)); } catch (e) {}
         } else if (adsList.length === 0) {
           try { const cached = localStorage.getItem('_cachedAds'); if (cached) adsList = JSON.parse(cached); } catch (e) {}
@@ -685,47 +812,79 @@
     function rotateAd() {
       if (!adsEnabled || adsList.length === 0) return;
       currentAdIdx = (currentAdIdx + 1) % adsList.length;
-      renderAdInTokenCard();
+      goToAdSlide(currentAdIdx);
+    }
+
+    function prevAd() {
+      if (!adsEnabled || adsList.length === 0) return;
+      currentAdIdx = (currentAdIdx - 1 + adsList.length) % adsList.length;
+      goToAdSlide(currentAdIdx);
+    }
+
+    function nextAd() {
+      if (!adsEnabled || adsList.length === 0) return;
+      currentAdIdx = (currentAdIdx + 1) % adsList.length;
+      goToAdSlide(currentAdIdx);
+    }
+
+    function goToAdSlide(idx) {
+      const slides = document.querySelectorAll('.ad-slide');
+      const dots = document.querySelectorAll('.ad-dot');
+      slides.forEach((s, i) => s.classList.toggle('active', i === idx));
+      dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+      currentAdIdx = idx;
+      const counterLabel = document.getElementById('adCounterLabel');
+      if (counterLabel && adsList.length > 0) {
+        counterLabel.textContent = 'Ad ' + (idx + 1) + '/' + adsList.length;
+      }
+      const ad = adsList[idx];
+      if (ad && ad.adImpUrl && !adImpressionSent.has(idx)) {
+        adImpressionSent.add(idx);
+        fetch('/api/ads/impression', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ impUrl: ad.adImpUrl, mode: 'LITE' }) }).catch(() => {});
+      }
     }
 
     function renderAdInTokenCard() {
-      const container = document.getElementById('tokenCardContent');
-      if (!container) return;
+      const slidesContainer = document.getElementById('adSlidesContainer');
+      const dotsContainer = document.getElementById('adDots');
+      const counterLabel = document.getElementById('adCounterLabel');
+      const arrows = document.querySelectorAll('.ad-arrow');
+      if (!slidesContainer || !dotsContainer) return;
       if (!adsEnabled) {
-        container.innerHTML = '<div style="font-size:12px;color:rgba(13,17,23,0.4)">Ads disabled</div>';
+        slidesContainer.innerHTML = '<div style="font-size:12px;color:rgba(13,17,23,0.4);text-align:center;padding:12px 0">Ads disabled</div>';
+        dotsContainer.innerHTML = '';
+        if (counterLabel) counterLabel.textContent = 'Ads off';
+        arrows.forEach(a => a.style.display = 'none');
         return;
       }
-      const ad = adsList.length > 0 ? adsList[currentAdIdx] : null;
-      let inner = '';
-      if (ad) {
+      arrows.forEach(a => a.style.display = adsList.length > 1 ? '' : 'none');
+      if (adsList.length === 0) {
+        slidesContainer.innerHTML = '<div style="font-size:12px;color:rgba(13,17,23,0.4);text-align:center;padding:12px 0">No ads available</div>';
+        dotsContainer.innerHTML = '';
+        if (counterLabel) counterLabel.textContent = 'Ad';
+        return;
+      }
+      if (currentAdIdx >= adsList.length) currentAdIdx = 0;
+      slidesContainer.innerHTML = adsList.map((ad, i) => {
+        let inner = '';
         if (ad.adHtml) {
           inner = ad.adHtml;
         } else if (ad.adImage || ad.adTitle) {
-          inner = `
-            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-              ${ad.adImage ? `<img src="${escapeHtml(ad.adImage)}" alt="${escapeHtml(ad.adTitle)}" style="width:40px;height:40px;border-radius:6px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,0.15)">` : ''}
-              <div style="flex:1;min-width:0">
-                ${ad.adSponsor ? `<div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.4);margin-bottom:1px;text-align:left">${escapeHtml(ad.adSponsor)}</div>` : ''}
-                ${ad.adTitle ? `<div style="font-weight:600;font-size:12px;color:#0d1117;margin-bottom:1px;text-align:left">${escapeHtml(ad.adTitle)}</div>` : ''}
-                ${ad.adDescription ? `<div style="font-size:10px;color:rgba(13,17,23,0.5);line-height:1.3;text-align:left">${escapeHtml(ad.adDescription)}</div>` : ''}
-              </div>
-              ${ad.adCallToAction ? `<a href="${escapeHtml(ad.adLink)}" target="_blank" rel="noopener sponsored" style="background:rgba(13,17,23,0.1);border:1px solid rgba(13,17,23,0.2);color:#0d1117;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:600;white-space:nowrap;flex-shrink:0;text-decoration:none">${escapeHtml(ad.adCallToAction)}</a>` : ''}
-            </div>`;
+          inner = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            ${ad.adImage ? `<img src="${escapeHtml(ad.adImage)}" alt="${escapeHtml(ad.adTitle)}" style="width:40px;height:40px;border-radius:6px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,0.15)">` : ''}
+            <div style="flex:1;min-width:0">
+              ${ad.adSponsor ? `<div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.4);margin-bottom:1px;text-align:left">${escapeHtml(ad.adSponsor)}</div>` : ''}
+              ${ad.adTitle ? `<div style="font-weight:600;font-size:12px;color:#0d1117;margin-bottom:1px;text-align:left">${escapeHtml(ad.adTitle)}</div>` : ''}
+              ${ad.adDescription ? `<div style="font-size:10px;color:rgba(13,17,23,0.5);line-height:1.3;text-align:left">${escapeHtml(ad.adDescription)}</div>` : ''}
+            </div>
+            ${ad.adCallToAction ? `<a href="${escapeHtml(ad.adLink)}" target="_blank" rel="noopener sponsored" style="background:rgba(13,17,23,0.1);border:1px solid rgba(13,17,23,0.2);color:#0d1117;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:600;white-space:nowrap;flex-shrink:0;text-decoration:none">${escapeHtml(ad.adCallToAction)}</a>` : ''}
+          </div>`;
         }
-      }
-      if (!inner) {
-        inner = '<div style="font-size:12px;color:rgba(13,17,23,0.4)">No current ad</div>';
-      }
-      container.style.cursor = 'default';
-      container.style.background = 'rgba(255,255,255,0.5)';
-      container.style.position = 'relative';
-      container.innerHTML = `
-        <div style="position:absolute;top:3px;right:6px;font-size:7px;color:#000;text-transform:uppercase;letter-spacing:1px">Ad${adsList.length > 1 ? ' ' + (currentAdIdx + 1) + '/' + adsList.length : ''}</div>
-        ${inner}`;
-      if (ad && ad.adImpUrl && !adImpressionSent.has(currentAdIdx)) {
-        adImpressionSent.add(currentAdIdx);
-        fetch('/api/ads/impression', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ impUrl: ad.adImpUrl, mode: 'LITE' }) }).catch(() => {});
-      }
+        if (!inner) inner = '<div style="font-size:12px;color:rgba(13,17,23,0.4)">No ad content</div>';
+        return `<div class="ad-slide${i === currentAdIdx ? ' active' : ''}" style="padding:4px 0">${inner}</div>`;
+      }).join('');
+      dotsContainer.innerHTML = adsList.map((_, i) => `<span class="ad-dot${i === currentAdIdx ? ' active' : ''}" onclick="goToAdSlide(${i})"><span class="dot-indicator"></span></span>`).join('');
+      if (counterLabel) counterLabel.textContent = adsList.length > 1 ? 'Ad ' + (currentAdIdx + 1) + '/' + adsList.length : 'Ad';
     }
 
     async function loadConfiguration() {
@@ -736,6 +895,7 @@
         const configData = await configResponse.json();
         if (configData) {
           config = configData;
+          disabledModels = Array.isArray(configData.disabledModels) ? configData.disabledModels : [];
           if (document.getElementById('listenAddr')) document.getElementById('listenAddr').value = configData.listenAddr || ':8080';
           if (document.getElementById('upstreamUrl')) document.getElementById('upstreamUrl').value = configData.upstreamBaseURL || 'https://www.codebuff.com';
           if (document.getElementById('rotationInterval')) document.getElementById('rotationInterval').value = configData.rotationInterval || '6h';
@@ -793,16 +953,28 @@
       const container = document.getElementById('modelsContainer');
       document.getElementById('modelCountBadge').textContent = models.length;
       if (models.length === 0) { container.innerHTML = '<p class="text-muted">No models available</p>'; return; }
-      container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:3px">${models.map((model, idx) => `<div class="model-tag enabled" onclick="toggleModel(${idx})" id="model-${idx}"><input type="checkbox" class="form-check-input" checked><div><div class="model-tag-name">${escapeHtml(MODEL_DISPLAY_NAMES[model] || model.split('/').pop())}</div><div class="model-tag-id" title="${escapeHtml(model)}">${escapeHtml(model)}</div></div></div>`).join('')}</div>`;
+      container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:3px">${models.map((model, idx) => {
+        const isDisabled = disabledModels.includes(model);
+        return `<div class="model-tag${isDisabled ? '' : ' enabled'}" onclick="toggleModel(${idx})" id="model-${idx}"><input type="checkbox" class="form-check-input"${isDisabled ? '' : ' checked'}><div><div class="model-tag-name">${escapeHtml(MODEL_DISPLAY_NAMES[model] || model.split('/').pop())}</div><div class="model-tag-id" title="${escapeHtml(model)}">${escapeHtml(model)}</div></div></div>`;
+      }).join('')}</div>`;
     }
 
     function toggleModel(idx) {
+      const model = models[idx];
       const tag = document.getElementById(`model-${idx}`);
       const checkbox = tag.querySelector('input[type="checkbox"]');
-      const isEnabled = tag.classList.contains('enabled');
-      if (isEnabled) { tag.classList.remove('enabled'); checkbox.checked = false; }
-      else { tag.classList.add('enabled'); checkbox.checked = true; }
-      showToast(`${MODEL_DISPLAY_NAMES[models[idx]] || models[idx].split('/').pop()} ${isEnabled ? 'disabled' : 'enabled'}`, 'info');
+      const isCurrentlyEnabled = tag.classList.contains('enabled');
+      if (isCurrentlyEnabled) {
+        tag.classList.remove('enabled');
+        checkbox.checked = false;
+        if (!disabledModels.includes(model)) disabledModels.push(model);
+      } else {
+        tag.classList.add('enabled');
+        checkbox.checked = true;
+        disabledModels = disabledModels.filter(m => m !== model);
+      }
+      fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabledModels }) });
+      showToast(`${MODEL_DISPLAY_NAMES[model] || model.split('/').pop()} ${isCurrentlyEnabled ? 'disabled' : 'enabled'}`, 'info');
     }
 
     async function startOAuth() {
@@ -957,7 +1129,6 @@
 
     function updateStats() {
       if (!proxyData || !proxyData.token_state) return;
-      renderAdInTokenCard();
       document.getElementById('totalModels').textContent = models.length;
       document.getElementById('startedAt').textContent = new Date(proxyData.started_at).toLocaleString();
       document.getElementById('tokenCountBadge').textContent = proxyData.token_state.length;
@@ -1027,12 +1198,11 @@
 
     document.addEventListener('DOMContentLoaded', () => {
       initLiquidGlass();
-      try { const cached = localStorage.getItem('adsEnabled'); if (cached === 'false') { adsEnabled = false; document.getElementById('adsToggle').checked = false; } } catch (e) {}
-      loadConfiguration().then(() => { fetchBingWallpaper(); if (adsEnabled) fetchAds().then(() => renderAdInTokenCard()); else renderAdInTokenCard(); });
+      try { const cached = localStorage.getItem('adsEnabled'); if (cached === 'false') { adsEnabled = false; const t = document.getElementById('adsToggleEnv'); if (t) t.checked = false; } } catch (e) {}
+      loadConfiguration().then(() => { fetchBingWallpaper(); if (adsEnabled) fetchAds().then(() => { renderAdInTokenCard(); setTimeout(() => initLiquidGlass(), 100); }); else { renderAdInTokenCard(); setTimeout(() => initLiquidGlass(), 100); } });
       checkHealth();
       setInterval(() => checkHealth(true), 5000);
       setInterval(() => rotateAd(), 30000);
-      setInterval(() => updateRemainingDisplay(), 1000);
       setInterval(() => updateRemainingDisplay(), 1000);
     });
   </script>
