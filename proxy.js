@@ -30,6 +30,10 @@ const CANONICAL_MODEL_ALIASES = {
   'deepseek-v4-pro': 'deepseek/deepseek-v4-pro',
   'deepseek-v4-flash': 'deepseek/deepseek-v4-flash',
   'deepseek-v3.1-terminus': 'deepseek/deepseek-v4-pro',
+  'mimo-v2.5-pro': 'mimo/mimo-v2.5-pro',
+  'mimo-v2.5': 'mimo/mimo-v2.5',
+  'kimi-k2.6': 'moonshotai/kimi-k2.6',
+  'minimax-m2.7': 'minimax/minimax-m2.7',
 };
 
 const FALLBACK_AGENT_IDS = {
@@ -37,6 +41,8 @@ const FALLBACK_AGENT_IDS = {
   'moonshotai/kimi-k2.6': 'base2-free-kimi',
   'deepseek/deepseek-v4-pro': 'base2-free-deepseek',
   'deepseek/deepseek-v4-flash': 'base2-free-deepseek-flash',
+  'mimo/mimo-v2.5-pro': 'base2-free',
+  'mimo/mimo-v2.5': 'base2-free',
 };
 
 function canonicalModelName(model) {
@@ -322,22 +328,37 @@ class ModelRegistry {
   }
 
   async refresh() {
+    // --- HARDCODED MODELS (remote fetching disabled) ---
+    const HARDCODED_MODELS = [
+      { model: 'deepseek/deepseek-v4-pro', agent: 'base2-free-deepseek', displayName: '[LIM] DeepSeek V4 Pro' },
+      { model: 'mimo/mimo-v2.5-pro', agent: 'base2-free', displayName: '[LIM] MiMo 2.5 Pro' },
+      { model: 'moonshotai/kimi-k2.6', agent: 'base2-free-kimi', displayName: '[LIM] Kimi K2.6' },
+      { model: 'deepseek/deepseek-v4-flash', agent: 'base2-free-deepseek-flash', displayName: 'DeepSeek V4 Flash' },
+      { model: 'mimo/mimo-v2.5', agent: 'base2-free', displayName: 'MiMo 2.5' },
+      { model: 'minimax/minimax-m2.7', agent: 'base2-free', displayName: 'MiniMax M2.7' },
+    ];
+
     try {
-      const [agentsSource, modelsSource] = await Promise.all([
-        this.fetchSource(FREE_AGENTS_SOURCE_URL),
-        this.fetchSource(FREEBUFF_MODELS_SOURCE_URL)
-      ]);
-      const variableMap = this.parseConstants(modelsSource);
-      const agents = this.parseAllFreeModels(agentsSource, variableMap);
-      const rootAgentMapping = this.parseRootAgentModelMapping(agentsSource, variableMap);
-      if (rootAgentMapping.size === 0) throw new Error('No model-agent mappings found in source');
-      const { modelToAgent, allModels } = this.buildModelMapping(agents, rootAgentMapping);
-      this.agentModels = agents;
+      const modelToAgent = new Map();
+      const allModels = [];
+      const modelDisplayNames = new Map();
+      const agentModels = new Map();
+
+      for (const entry of HARDCODED_MODELS) {
+        modelToAgent.set(entry.model, entry.agent);
+        allModels.push(entry.model);
+        modelDisplayNames.set(entry.model, entry.displayName);
+        if (!agentModels.has(entry.agent)) agentModels.set(entry.agent, []);
+        agentModels.get(entry.agent).push(entry.model);
+      }
+
+      allModels.sort();
+      this.agentModels = agentModels;
       this.modelToAgent = modelToAgent;
       this.allModels = allModels;
-      this.modelDisplayNames = this.parseDisplayNames(modelsSource);
+      this.modelDisplayNames = modelDisplayNames;
       this.lastOK = new Date();
-      console.log(`Model registry: updated ${agents.size} agents, ${allModels.length} models: ${allModels.join(', ')}`);
+      console.log(`Model registry: hardcoded ${allModels.length} models: ${allModels.join(', ')}`);
     } catch (e) {
       console.error('Model registry: refresh failed:', e.message);
       if (this.allModels.length === 0) console.error('Model registry: no models available and refresh failed');
@@ -1181,7 +1202,6 @@ async function handleClaudeMessages(req, res) {
   try { requestBody = await readBody(req); } catch (e) { writeClaudeError(res, 400, 'failed to read request body', 'invalid_request_error'); return; }
   let payload, requestedModel, stream;
   try { ({ payload, modelName: requestedModel, stream } = convertClaudeMessagesRequestToOpenAI(requestBody)); } catch (e) { writeClaudeError(res, 400, e.message, 'invalid_request_error'); return; }
-  if (!modelRegistry.getAgentForModel(requestedModel)) { writeClaudeError(res, 400, `unsupported model "${requestedModel}"`, 'invalid_request_error'); return; }
   await proxyChatRequest(res, payload, requestedModel, (r, s, m, t, _) => writeClaudeError(r, s, m, t), writeClaudePassthroughError, (r, resp) => writeClaudeSuccessResponse(r, resp, requestedModel, stream));
 }
 
@@ -1191,7 +1211,6 @@ async function handleClaudeCountTokens(req, res) {
   try { requestBody = await readBody(req); } catch (e) { writeClaudeError(res, 400, 'failed to read request body', 'invalid_request_error'); return; }
   let payload, requestedModel;
   try { ({ payload, modelName: requestedModel } = convertClaudeMessagesRequestToOpenAI(requestBody)); } catch (e) { writeClaudeError(res, 400, e.message, 'invalid_request_error'); return; }
-  if (!modelRegistry.hasModel(requestedModel)) { writeClaudeError(res, 400, `unsupported model "${requestedModel}"`, 'invalid_request_error'); return; }
   writeJSON(res, 200, { input_tokens: countOpenAIPayloadTokens(requestedModel, payload) });
 }
 
@@ -1234,8 +1253,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     }
 
     const canonicalModel = canonicalModelName(actualModel);
-    const agentID = modelRegistry.getAgentForModel(canonicalModel) || FALLBACK_AGENT_IDS[canonicalModel];
-    if (!agentID) { writeError(res, 400, `unsupported model "${actualModel}"`, 'invalid_request_error', 'model_not_found'); return; }
+    const agentID = modelRegistry.getAgentForModel(canonicalModel) || FALLBACK_AGENT_IDS[canonicalModel] || 'base2-free';
 
     let run;
     try {

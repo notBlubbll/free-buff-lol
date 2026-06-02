@@ -780,11 +780,20 @@
       }).join('');
     }
 
+    const MODEL_DISPLAY_NAMES = {
+      'deepseek/deepseek-v4-pro': '[LIM] DeepSeek V4 Pro',
+      'mimo/mimo-v2.5-pro': '[LIM] MiMo 2.5 Pro',
+      'moonshotai/kimi-k2.6': '[LIM] Kimi K2.6',
+      'deepseek/deepseek-v4-flash': 'DeepSeek V4 Flash',
+      'mimo/mimo-v2.5': 'MiMo 2.5',
+      'minimax/minimax-m2.7': 'MiniMax M2.7',
+    };
+
     function renderModels() {
       const container = document.getElementById('modelsContainer');
       document.getElementById('modelCountBadge').textContent = models.length;
       if (models.length === 0) { container.innerHTML = '<p class="text-muted">No models available</p>'; return; }
-      container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:3px">${models.map((model, idx) => `<div class="model-tag enabled" onclick="toggleModel(${idx})" id="model-${idx}"><input type="checkbox" class="form-check-input" checked><div><div class="model-tag-name">${escapeHtml(model.split('/').pop())}</div><div class="model-tag-id" title="${escapeHtml(model)}">${escapeHtml(model)}</div></div></div>`).join('')}</div>`;
+      container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:3px">${models.map((model, idx) => `<div class="model-tag enabled" onclick="toggleModel(${idx})" id="model-${idx}"><input type="checkbox" class="form-check-input" checked><div><div class="model-tag-name">${escapeHtml(MODEL_DISPLAY_NAMES[model] || model.split('/').pop())}</div><div class="model-tag-id" title="${escapeHtml(model)}">${escapeHtml(model)}</div></div></div>`).join('')}</div>`;
     }
 
     function toggleModel(idx) {
@@ -793,7 +802,7 @@
       const isEnabled = tag.classList.contains('enabled');
       if (isEnabled) { tag.classList.remove('enabled'); checkbox.checked = false; }
       else { tag.classList.add('enabled'); checkbox.checked = true; }
-      showToast(`${models[idx].split('/').pop()} ${isEnabled ? 'disabled' : 'enabled'}`, 'info');
+      showToast(`${MODEL_DISPLAY_NAMES[models[idx]] || models[idx].split('/').pop()} ${isEnabled ? 'disabled' : 'enabled'}`, 'info');
     }
 
     async function startOAuth() {
