@@ -156,15 +156,76 @@ function loadConfig() {
 
 function loadFreebuffCLITokens() {
   const tokens = [];
-  const credPath = path.join(os.homedir(), '.config', 'manicode', 'credentials.json');
-  if (fs.existsSync(credPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(credPath, 'utf8'));
-      if (data.default && data.default.authToken) tokens.push(data.default.authToken);
-      for (const [key, value] of Object.entries(data)) {
-        if (key !== 'default' && value && value.authToken) tokens.push(value.authToken);
+  const credFile = 'credentials.json';
+  const subPath = path.join('.config', 'manicode', credFile);
+
+  const searchPaths = [];
+  const seen = new Set();
+  const addPath = (p) => {
+    const resolved = path.resolve(p);
+    if (!seen.has(resolved)) { seen.add(resolved); searchPaths.push(resolved); }
+  };
+
+  const home = os.homedir();
+  addPath(path.join(home, subPath));
+
+  const envCandidates = [
+    process.env.USERPROFILE, process.env.HOME,
+    (process.env.HOMEDRIVE && process.env.HOMEPATH) ? path.join(process.env.HOMEDRIVE, process.env.HOMEPATH) : null,
+    process.env.APPDATA, process.env.LOCALAPPDATA, process.env.XDG_CONFIG_HOME
+  ].filter(Boolean);
+  for (const envDir of envCandidates) {
+    if (envDir) {
+      addPath(path.join(envDir, subPath));
+      if (path.basename(envDir) !== 'manicode') {
+        addPath(path.join(envDir, credFile));
       }
-    } catch (e) { console.error('Failed to parse Freebuff CLI credentials:', e.message); }
+    }
+  }
+
+  if (process.platform === 'win32') {
+    try {
+      const root = path.parse(home).root || 'C:\\';
+      const usersDir = path.join(root, 'Users');
+      if (fs.existsSync(usersDir)) {
+        for (const entry of fs.readdirSync(usersDir)) {
+          if (entry.startsWith('.')) continue;
+          const userDir = path.join(usersDir, entry);
+          try {
+            if (!fs.statSync(userDir).isDirectory()) continue;
+          } catch (e) { continue; }
+          addPath(path.join(userDir, subPath));
+          addPath(path.join(userDir, 'AppData', 'Roaming', 'manicode', credFile));
+          addPath(path.join(userDir, 'AppData', 'Local', 'manicode', credFile));
+        }
+      }
+    } catch (e) {}
+  } else {
+    const etcPasswd = '/etc/passwd';
+    try {
+      const passwd = fs.readFileSync(etcPasswd, 'utf8');
+      for (const line of passwd.split('\n')) {
+        const parts = line.split(':');
+        if (parts.length >= 6 && parts[2] !== '0' && parts[5]) {
+          addPath(path.join(parts[5], subPath));
+          addPath(path.join(parts[5], '.local', 'share', 'manicode', credFile));
+        }
+      }
+    } catch (e) {}
+    addPath(path.join('/root', subPath));
+  }
+
+  for (const credPath of searchPaths) {
+    if (fs.existsSync(credPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+        if (data.default && data.default.authToken) tokens.push(data.default.authToken);
+        for (const [key, value] of Object.entries(data)) {
+          if (key !== 'default' && value && value.authToken) tokens.push(value.authToken);
+        }
+        if (tokens.length > 0) break;
+      } catch (e) { console.error('Failed to parse Freebuff CLI credentials:', e.message); }
+    }
   }
   return tokens;
 }
@@ -405,9 +466,27 @@ class ModelRegistry {
 
 // --- Warp Plus Manager ---
 const WARP_PLUS_RELEASE_URL = 'https://github.com/bepass-org/warp-plus/releases/download/v1.2.6/warp-plus_windows-amd64.zip';
-const WARP_PLUS_BIN = path.join(__dirname, 'bin', 'warp-plus.exe');
+const WARP_PLUS_BIN_LOCAL = path.join(__dirname, 'bin', 'warp-plus.exe');
 const WARP_PLUS_PORT = 8086;
 const WARP_PLUS_ADDR = `socks5://127.0.0.1:${WARP_PLUS_PORT}`;
+
+function findWarpPlusBin() {
+  const names = process.platform === 'win32' ? ['warp-plus.exe', 'warp-plus'] : ['warp-plus'];
+  const pathDirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  for (const dir of pathDirs) {
+    for (const name of names) {
+      try {
+        const full = path.join(dir, name);
+        if (fs.existsSync(full) && fs.statSync(full).isFile()) return full;
+      } catch (e) {}
+    }
+  }
+  return null;
+}
+
+function getWarpPlusBin() {
+  return findWarpPlusBin() || WARP_PLUS_BIN_LOCAL;
+}
 
 class WarpPlusManager {
   constructor() {
@@ -419,11 +498,17 @@ class WarpPlusManager {
   }
 
   async ensureBinary() {
-    if (fs.existsSync(WARP_PLUS_BIN)) return true;
-    console.log('[WarpPlus] Binary not found, downloading...');
-    const binDir = path.dirname(WARP_PLUS_BIN);
+    const binPath = getWarpPlusBin();
+    if (fs.existsSync(binPath)) {
+      this._binPath = binPath;
+      const inPath = binPath !== WARP_PLUS_BIN_LOCAL;
+      console.log(`[WarpPlus] Binary found at: ${binPath}${inPath ? ' (from PATH)' : ' (local)'}`);
+      return true;
+    }
+    console.log('[WarpPlus] Binary not found in PATH or local, downloading...');
+    const binDir = path.dirname(WARP_PLUS_BIN_LOCAL);
     if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
-    const tmpPath = WARP_PLUS_BIN + '.tmp';
+    const tmpPath = WARP_PLUS_BIN_LOCAL + '.tmp';
     const zipPath = path.join(binDir, 'warp-plus.zip');
     try {
       const resp = await fetch(WARP_PLUS_RELEASE_URL, { redirect: 'follow' });
@@ -433,7 +518,8 @@ class WarpPlusManager {
       const { execSync } = require('child_process');
       execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${binDir}' -Force"`);
       fs.unlinkSync(zipPath);
-      if (!fs.existsSync(WARP_PLUS_BIN)) throw new Error('warp-plus.exe not found after extraction');
+      if (!fs.existsSync(WARP_PLUS_BIN_LOCAL)) throw new Error('warp-plus.exe not found after extraction');
+      this._binPath = WARP_PLUS_BIN_LOCAL;
       console.log('[WarpPlus] Binary downloaded successfully');
       return true;
     } catch (e) {
@@ -449,6 +535,7 @@ class WarpPlusManager {
     this.starting = true;
     const hasBin = await this.ensureBinary();
     if (!hasBin) { this.starting = false; return false; }
+    const binPath = this._binPath || getWarpPlusBin();
     console.log(`[WarpPlus] Starting SOCKS5 proxy on port ${WARP_PLUS_PORT}...`);
     try {
       const args = ['-b', `127.0.0.1:${WARP_PLUS_PORT}`, '-4'];
@@ -456,10 +543,10 @@ class WarpPlusManager {
         args.push('-e', this.lastEndpoint);
         console.log(`[WarpPlus] Reusing cached endpoint: ${this.lastEndpoint}`);
       }
-      this.process = spawn(WARP_PLUS_BIN, args, {
+      this.process = spawn(binPath, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
-        cwd: path.dirname(WARP_PLUS_BIN)
+        cwd: path.dirname(binPath)
       });
       this.process.stdout.on('data', (d) => {
         const msg = d.toString().trim();

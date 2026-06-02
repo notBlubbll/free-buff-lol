@@ -1,10 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
 
-taskkill /F /FI "WINDOWTITLE eq Freebuff2Opencode Proxy" /T >nul 2>&1
-timeout /t 1 /nobreak >nul
-
-title Freebuff2Opencode Proxy
 cd /d "%~dp0"
 
 echo ==================================================
@@ -12,16 +8,39 @@ echo  Freebuff2Opencode Proxy
 echo ==================================================
 echo.
 
-set "BUN_PATH=C:\WINDOWS\system32\config\systemprofile\.bun\bin"
-set "PATH=%BUN_PATH%;%PATH%"
+set "BUN_PATH="
+where bun >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    for /f "delims=" %%b in ('where bun') do (
+        if not defined BUN_PATH set "BUN_PATH=%%~dpb"
+    )
+    goto :bunpathset
+)
+for %%d in ("%USERPROFILE%\.bun\bin" "%LOCALAPPDATA%\bun\bin" "%APPDATA%\bun\bin" "%PROGRAMFILES%\bun\bin" "%SYSTEMDRIVE%\.bun\bin") do (
+    if exist "%%~d\bun.exe" (
+        set "BUN_PATH=%%~d"
+        goto :bunpathset
+    )
+)
+for /f "delims=" %%u in ('dir /b /ad "C:\Users" 2^>nul') do (
+    if exist "C:\Users\%%u\.bun\bin\bun.exe" (
+        set "BUN_PATH=C:\Users\%%u\.bun\bin"
+        goto :bunpathset
+    )
+)
+:bunpathset
+if defined BUN_PATH (
+    echo [INFO] Bun found at: %BUN_PATH%
+    set "PATH=%BUN_PATH%;%PATH%"
+)
 
-echo [1/3] Cleaning up...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8080') do (
+echo [1/4] Cleaning up...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8080.*LISTENING"') do (
     taskkill /PID %%a /F >nul 2>&1
 )
 timeout /t 1 /nobreak >nul
 
-echo [2/3] Detecting runtime...
+echo [2/4] Detecting runtime...
 where bun >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo [INFO] Runtime: Bun
@@ -41,7 +60,14 @@ timeout /t 5
 exit
 
 :start
-echo [3/3] Starting proxy...
+echo [3/4] Installing dependencies...
+if "%RUNTIME%"=="bun" (
+    bun install
+) else (
+    npm install --production
+)
+
+echo [4/4] Starting proxy...
 echo.
 echo ==================================================
 echo  Proxy: http://localhost:8080
