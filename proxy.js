@@ -24,6 +24,7 @@ let BUN_VERSION = '1.3.11';
 let AI_SDK_COMPAT_VERSION = '0.0.0-test';
 let AI_SDK_PROVIDER_UTILS_VERSION = '3.0.20';
 let FREEBUFF_CLI_VERSION = '0.0.96';
+let DETECTED_COUNTRY = null;
 
 const CANONICAL_MODEL_ALIASES = {
   'deepseek-v4-pro': 'deepseek/deepseek-v4-pro',
@@ -328,8 +329,9 @@ class ModelRegistry {
       ]);
       const variableMap = this.parseConstants(modelsSource);
       const agents = this.parseAllFreeModels(agentsSource, variableMap);
-      if (agents.size === 0) throw new Error('No free agents found in source');
-      const { modelToAgent, allModels } = this.buildModelMapping(agents);
+      const rootAgentMapping = this.parseRootAgentModelMapping(agentsSource, variableMap);
+      if (rootAgentMapping.size === 0) throw new Error('No model-agent mappings found in source');
+      const { modelToAgent, allModels } = this.buildModelMapping(agents, rootAgentMapping);
       this.agentModels = agents;
       this.modelToAgent = modelToAgent;
       this.allModels = allModels;
@@ -381,16 +383,27 @@ class ModelRegistry {
     return result;
   }
 
-  buildModelMapping(agentModels) {
-    const SUPPORTED_MODELS = {
-      'minimax/minimax-m2.7': 'base2-free',
-      'moonshotai/kimi-k2.6': 'base2-free-kimi',
-      'deepseek/deepseek-v4-pro': 'base2-free-deepseek',
-      'deepseek/deepseek-v4-flash': 'base2-free-deepseek-flash'
-    };
+  parseRootAgentModelMapping(source, variableMap) {
+    const result = new Map();
+    const blockPattern = /FREEBUFF_ROOT_AGENT_ID_BY_MODEL[^{]*\{([^}]+)\}/gs;
+    const blockMatch = blockPattern.exec(source);
+    if (!blockMatch) return result;
+    const body = blockMatch[1];
+    const entryPattern = /\[(\w+)\]\s*:\s*'([^']+)'/g;
+    let m;
+    while ((m = entryPattern.exec(body)) !== null) {
+      const varName = m[1];
+      const agentId = m[2];
+      const modelId = variableMap.get(varName);
+      if (modelId) result.set(modelId, agentId);
+    }
+    return result;
+  }
+
+  buildModelMapping(agentModels, rootAgentMapping) {
     const modelToAgent = new Map();
     const allModels = [];
-    for (const [model, rootAgent] of Object.entries(SUPPORTED_MODELS)) {
+    for (const [model, rootAgent] of rootAgentMapping) {
       modelToAgent.set(model, rootAgent);
       allModels.push(model);
     }
@@ -400,37 +413,6 @@ class ModelRegistry {
 
   parseDisplayNames(source) {
     const map = new Map();
-    const blockPattern = /\{\s*id:\s*(?:FREEBUFF_\w+|'[^']*')[\s\S]*?displayName:\s*'([^']+)'/g;
-    const lines = source.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const idMatch = lines[i].match(/id:\s*(\w+|'[^']*')/);
-      if (!idMatch) continue;
-      let idRef = idMatch[1];
-      for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
-        const dnMatch = lines[j].match(/displayName:\s*'([^']+)'/);
-        if (dnMatch) {
-          const id = idRef.startsWith("'") ? idRef.slice(1, -1) : idRef;
-          map.set(id, dnMatch[1]);
-          break;
-        }
-      }
-    }
-    const resolved = new Map();
-    const constPattern = /export const (\w+)\s*=\s*['"]([^'"]+)['"]/g;
-    let cm;
-    while ((cm = constPattern.exec(source)) !== null) {
-      if (map.has(cm[1])) resolved.set(cm[2], map.get(cm[1]));
-    }
-    return resolved;
-  }
-
-  getDisplayName(model) {
-    return this.modelDisplayNames.get(model) || model.split('/').pop();
-  }
-
-  parseDisplayNames(source) {
-    const map = new Map();
-    const blockPattern = /\{\s*id:\s*(?:FREEBUFF_\w+|'[^']*')[\s\S]*?displayName:\s*'([^']+)'/g;
     const lines = source.split('\n');
     for (let i = 0; i < lines.length; i++) {
       const idMatch = lines[i].match(/id:\s*(\w+|'[^']*')/);
@@ -1153,7 +1135,7 @@ async function handleHealthz(req, res) {
       session_status: bestSession?.status || 'none',
       session_instance_id: bestSession?.instanceID || null,
       session_expires_at: bestSession?.expiresAt || null,
-      country_code: bestSession?.countryCode || null,
+      country_code: bestSession?.countryCode || DETECTED_COUNTRY || null,
       access_tier: bestSession?.accessTier || null,
       remaining_ms: bestSession?.remainingMs || null,
       runs: []
@@ -1672,6 +1654,33 @@ async function handleRequest(req, res) {
   res.end('Not Found');
 }
 
+// --- Country Detection ---
+async function detectCountry() {
+  try {
+    const resp = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(5000) });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.country_code) {
+        DETECTED_COUNTRY = data.country_code;
+        console.log(`[Country] Detected: ${DETECTED_COUNTRY}`);
+        return;
+      }
+    }
+  } catch (_) {}
+  try {
+    const resp = await fetch('https://ipinfo.io/json', { signal: AbortSignal.timeout(5000) });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.country) {
+        DETECTED_COUNTRY = data.country;
+        console.log(`[Country] Detected: ${DETECTED_COUNTRY}`);
+        return;
+      }
+    }
+  } catch (_) {}
+  console.log('[Country] Could not detect country');
+}
+
 // --- Server Startup ---
 async function startServer() {
   console.log('╔═══════════════════════════════════════════════════════════════╗');
@@ -1687,6 +1696,8 @@ async function startServer() {
   }
 
   await checkAndUpdateVersions();
+
+  detectCountry().catch(() => {});
 
   modelRegistry = new ModelRegistry();
   await modelRegistry.start();
