@@ -700,6 +700,7 @@
     let proxyData = null;
     let config = {};
     let models = [];
+    let modelMetadata = {};
     let disabledModels = [];
     let blurTokensEnabled = false;
     let oauthSession = null;
@@ -904,7 +905,7 @@
         }
         const modelsResponse = await fetch('/api/models');
         const modelsData = await modelsResponse.json();
-        if (modelsData && modelsData.models) { models = modelsData.models; renderModels(); }
+        if (modelsData && modelsData.models) { models = modelsData.models; modelMetadata = modelsData.model_metadata || {}; renderModels(); }
         renderTokenPools();
         updateStats();
       } catch (error) {
@@ -940,14 +941,11 @@
       }).join('');
     }
 
-    const MODEL_DISPLAY_NAMES = {
-      'deepseek/deepseek-v4-pro': '[LIM] DeepSeek V4 Pro',
-      'mimo/mimo-v2.5-pro': '[LIM] MiMo 2.5 Pro',
-      'moonshotai/kimi-k2.6': '[LIM] Kimi K2.6',
-      'deepseek/deepseek-v4-flash': 'DeepSeek V4 Flash',
-      'mimo/mimo-v2.5': 'MiMo 2.5',
-      'minimax/minimax-m2.7': 'MiniMax M2.7',
-    };
+    function getModelDisplayName(model) {
+      const meta = modelMetadata[model];
+      if (meta) return meta.premium ? `[LIM] ${meta.displayName}` : meta.displayName;
+      return model.split('/').pop();
+    }
 
     function renderModels() {
       const container = document.getElementById('modelsContainer');
@@ -955,7 +953,7 @@
       if (models.length === 0) { container.innerHTML = '<p class="text-muted">No models available</p>'; return; }
       container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:3px">${models.map((model, idx) => {
         const isDisabled = disabledModels.includes(model);
-        return `<div class="model-tag${isDisabled ? '' : ' enabled'}" onclick="toggleModel(${idx})" id="model-${idx}"><input type="checkbox" class="form-check-input"${isDisabled ? '' : ' checked'}><div><div class="model-tag-name">${escapeHtml(MODEL_DISPLAY_NAMES[model] || model.split('/').pop())}</div><div class="model-tag-id" title="${escapeHtml(model)}">${escapeHtml(model)}</div></div></div>`;
+        return `<div class="model-tag${isDisabled ? '' : ' enabled'}" onclick="toggleModel(${idx})" id="model-${idx}"><input type="checkbox" class="form-check-input"${isDisabled ? '' : ' checked'}><div><div class="model-tag-name">${escapeHtml(getModelDisplayName(model))}</div><div class="model-tag-id" title="${escapeHtml(model)}">${escapeHtml(model)}</div></div></div>`;
       }).join('')}</div>`;
     }
 
@@ -974,7 +972,7 @@
         disabledModels = disabledModels.filter(m => m !== model);
       }
       fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabledModels }) });
-      showToast(`${MODEL_DISPLAY_NAMES[model] || model.split('/').pop()} ${isCurrentlyEnabled ? 'disabled' : 'enabled'}`, 'info');
+      showToast(`${getModelDisplayName(model)} ${isCurrentlyEnabled ? 'disabled' : 'enabled'}`, 'info');
     }
 
     async function startOAuth() {

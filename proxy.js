@@ -12,6 +12,7 @@ const { SocksProxyAgent } = require('socks-proxy-agent');
 
 const FREE_AGENTS_SOURCE_URL = 'https://raw.githubusercontent.com/CodebuffAI/codebuff/main/common/src/constants/free-agents.ts';
 const FREEBUFF_MODELS_SOURCE_URL = 'https://raw.githubusercontent.com/CodebuffAI/codebuff/main/common/src/constants/freebuff-models.ts';
+const MODEL_CONFIG_SOURCE_URL = 'https://raw.githubusercontent.com/CodebuffAI/codebuff/main/common/src/constants/model-config.ts';
 const MODEL_REFRESH_INTERVAL = 6 * 60 * 60 * 1000;
 const TOKEN_RELOAD_INTERVAL = 5 * 60 * 1000;
 const CONTEXT_PRUNER_AGENT_ID = 'context-pruner';
@@ -366,6 +367,7 @@ class ModelRegistry {
     this.modelToParentAgent = new Map();
     this.modelToSessionModel = new Map();
     this.modelDisplayNames = new Map();
+    this.modelMetadata = new Map();
     this.allModels = [];
     this.lastOK = null;
     this.refreshTimer = null;
@@ -381,28 +383,76 @@ class ModelRegistry {
   }
 
   async refresh() {
-    // --- HARDCODED MODELS (remote fetching disabled) ---
-    // Based on upstream Codebuff free-tier agents:
-    //   github.com/CodebuffAI/codebuff/blob/main/common/src/constants/free-agents.ts
     const HARDCODED_MODELS = [
-      { model: 'deepseek/deepseek-v4-pro', agent: 'base2-free-deepseek', displayName: 'DeepSeek V4 Pro' },
-      { model: 'mimo/mimo-v2.5-pro', agent: 'base2-free-mimo-pro', displayName: 'MiMo 2.5 Pro' },
-      { model: 'moonshotai/kimi-k2.6', agent: 'base2-free-kimi', displayName: 'Kimi K2.6' },
-      { model: 'deepseek/deepseek-v4-flash', agent: 'base2-free-deepseek-flash', displayName: 'DeepSeek V4 Flash' },
-      { model: 'mimo/mimo-v2.5', agent: 'base2-free-mimo', displayName: 'MiMo 2.5' },
-      { model: 'minimax/minimax-m2.7', agent: 'base2-free', displayName: 'MiniMax M2.7' },
+      { model: 'deepseek/deepseek-v4-pro', agent: 'base2-free-deepseek', displayName: 'DeepSeek V4 Pro', premium: true, multimodal: false },
+      { model: 'mimo/mimo-v2.5-pro', agent: 'base2-free-mimo-pro', displayName: 'MiMo 2.5 Pro', premium: true, multimodal: true },
+      { model: 'moonshotai/kimi-k2.6', agent: 'base2-free-kimi', displayName: 'Kimi K2.6', premium: true, multimodal: true },
+      { model: 'minimax/minimax-m3', agent: 'base2-free-minimax-m3', displayName: 'MiniMax M3', premium: false, multimodal: true },
+      { model: 'deepseek/deepseek-v4-flash', agent: 'base2-free-deepseek-flash', displayName: 'DeepSeek V4 Flash', premium: false, multimodal: false },
+      { model: 'mimo/mimo-v2.5', agent: 'base2-free-mimo', displayName: 'MiMo 2.5', premium: false, multimodal: true },
+      { model: 'minimax/minimax-m2.7', agent: 'base2-free', displayName: 'MiniMax M2.7', premium: false, multimodal: false },
     ];
 
+    let loaded = false;
     try {
+      const [modelsSource, agentsSource, configSource] = await Promise.all([
+        this.fetchSource(FREEBUFF_MODELS_SOURCE_URL),
+        this.fetchSource(FREE_AGENTS_SOURCE_URL),
+        this.fetchSource(MODEL_CONFIG_SOURCE_URL)
+      ]);
+
+      const objectLiterals = this.parseObjectLiterals(configSource);
+      const modelConstants = this.parseConstants(modelsSource, objectLiterals);
+      const agentConstants = this.parseConstants(agentsSource);
+      const variableMap = new Map([...modelConstants, ...agentConstants]);
+
+      const rootAgentMapping = this.parseRootAgentModelMapping(agentsSource, variableMap);
+      const parsedMetadata = this.parseModelMetadata(modelsSource, variableMap);
+
+      if (rootAgentMapping.size > 0) {
+        const modelToAgent = new Map();
+        const allModels = [];
+        const modelDisplayNames = new Map();
+        const modelMetadata = new Map();
+        const agentModels = new Map();
+
+        for (const [model, agent] of rootAgentMapping) {
+          modelToAgent.set(model, agent);
+          allModels.push(model);
+          const meta = parsedMetadata.get(model);
+          const displayName = meta ? meta.displayName : model.split('/').pop();
+          modelDisplayNames.set(model, displayName);
+          modelMetadata.set(model, meta || { displayName, premium: false, multimodal: false });
+          if (!agentModels.has(agent)) agentModels.set(agent, []);
+          agentModels.get(agent).push(model);
+        }
+
+        allModels.sort();
+        this.agentModels = agentModels;
+        this.modelToAgent = modelToAgent;
+        this.allModels = allModels;
+        this.modelDisplayNames = modelDisplayNames;
+        this.modelMetadata = modelMetadata;
+        this.lastOK = new Date();
+        loaded = true;
+        console.log(`Model registry: fetched ${allModels.length} models from GitHub: ${allModels.join(', ')}`);
+      }
+    } catch (e) {
+      console.error('Model registry: GitHub fetch failed:', e.message);
+    }
+
+    if (!loaded) {
       const modelToAgent = new Map();
       const allModels = [];
       const modelDisplayNames = new Map();
+      const modelMetadata = new Map();
       const agentModels = new Map();
 
       for (const entry of HARDCODED_MODELS) {
         modelToAgent.set(entry.model, entry.agent);
         allModels.push(entry.model);
         modelDisplayNames.set(entry.model, entry.displayName);
+        modelMetadata.set(entry.model, { displayName: entry.displayName, premium: entry.premium, multimodal: entry.multimodal });
         if (!agentModels.has(entry.agent)) agentModels.set(entry.agent, []);
         agentModels.get(entry.agent).push(entry.model);
       }
@@ -412,11 +462,9 @@ class ModelRegistry {
       this.modelToAgent = modelToAgent;
       this.allModels = allModels;
       this.modelDisplayNames = modelDisplayNames;
+      this.modelMetadata = modelMetadata;
       this.lastOK = new Date();
-      console.log(`Model registry: hardcoded ${allModels.length} models: ${allModels.join(', ')}`);
-    } catch (e) {
-      console.error('Model registry: refresh failed:', e.message);
-      if (this.allModels.length === 0) console.error('Model registry: no models available and refresh failed');
+      console.log(`Model registry: hardcoded fallback ${allModels.length} models: ${allModels.join(', ')}`);
     }
   }
 
@@ -432,12 +480,36 @@ class ModelRegistry {
     });
   }
 
-  parseConstants(source) {
+  parseConstants(source, objectLiterals) {
     const constants = new Map();
     const pattern = /export const (\w+)\s*=\s*['"]([^'"]+)['"]/g;
     let match;
     while ((match = pattern.exec(source)) !== null) constants.set(match[1], match[2]);
+    if (objectLiterals) {
+      const refPattern = /export const (\w+)\s*=\s*(\w+)\.(\w+)/g;
+      while ((match = refPattern.exec(source)) !== null) {
+        const key = `${match[2]}.${match[3]}`;
+        if (objectLiterals.has(key)) constants.set(match[1], objectLiterals.get(key));
+      }
+    }
     return constants;
+  }
+
+  parseObjectLiterals(source) {
+    const result = new Map();
+    const lines = source.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const objMatch = lines[i].match(/^(?:export\s+)?const\s+(\w+)\s*=\s*\{$/);
+      if (!objMatch) continue;
+      const objName = objMatch[1];
+      for (let j = i + 1; j < Math.min(i + 20, lines.length); j++) {
+        const line = lines[j].trim();
+        if (line.startsWith('}')) break;
+        const propMatch = line.match(/^(\w+):\s*['"]([^'"]+)['"]/);
+        if (propMatch) result.set(`${objName}.${propMatch[1]}`, propMatch[2]);
+      }
+    }
+    return result;
   }
 
   parseAllFreeModels(source, variableMap) {
@@ -512,6 +584,34 @@ class ModelRegistry {
     return resolved;
   }
 
+  parseModelMetadata(source, variableMap) {
+    const result = new Map();
+    const lines = source.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const blockMatch = lines[i].match(/^const\s+(\w+)\s*=\s*\{$/);
+      if (!blockMatch) continue;
+      const varName = blockMatch[1];
+      let id = null, displayName = null, premium = false, multimodal = false;
+      for (let j = i + 1; j < Math.min(i + 20, lines.length); j++) {
+        const line = lines[j];
+        if (line.trim().startsWith('}')) break;
+        const idMatch = line.match(/id:\s*(\w+|'[^']*')/);
+        if (idMatch) {
+          const ref = idMatch[1];
+          id = ref.startsWith("'") ? ref.slice(1, -1) : (variableMap.get(ref) || ref);
+        }
+        const dnMatch = line.match(/displayName:\s*'([^']+)'/);
+        if (dnMatch) displayName = dnMatch[1];
+        const premMatch = line.match(/premium:\s*(true|false)/);
+        if (premMatch) premium = premMatch[1] === 'true';
+        const mmMatch = line.match(/multimodal:\s*(true|false)/);
+        if (mmMatch) multimodal = mmMatch[1] === 'true';
+      }
+      if (id && displayName) result.set(id, { displayName, premium, multimodal });
+    }
+    return result;
+  }
+
   getDisplayName(model) {
     return this.modelDisplayNames.get(model) || model.split('/').pop();
   }
@@ -520,6 +620,12 @@ class ModelRegistry {
   hasModel(model) { return this.modelToAgent.has(model); }
   getAgentForModel(model) { return this.modelToAgent.get(model); }
   getAgentIDs() { return Array.from(new Set(this.modelToAgent.values())); }
+  getModelMetadata(model) { return this.modelMetadata.get(model) || null; }
+  getAllModelMetadata() {
+    const obj = {};
+    for (const [k, v] of this.modelMetadata) obj[k] = v;
+    return obj;
+  }
 }
 
 // --- Warp Plus Manager ---
@@ -1782,7 +1888,7 @@ async function handleRequest(req, res) {
     return;
   }
 
-  if (pathname === '/api/models' && req.method === 'GET') { writeJSON(res, 200, { models: modelRegistry.getModels() }); return; }
+  if (pathname === '/api/models' && req.method === 'GET') { writeJSON(res, 200, { models: modelRegistry.getModels(), model_metadata: modelRegistry.getAllModelMetadata() }); return; }
 
   if (pathname === '/api/bg' && req.method === 'GET') {
     try { const response = await fetch('https://peapix.com/bing/feed'); const data = await response.json(); const item = Array.isArray(data) ? data[0] : data; const imgUrl = item.fullUrl || item.imageUrl || item.url || ''; if (imgUrl) writeJSON(res, 200, { url: imgUrl }); else writeJSON(res, 404, { error: 'not found' }); }
