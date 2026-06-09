@@ -4,10 +4,10 @@
 
 ```
 FREEBUFF-PROXY/
-├── proxy.js              # Main proxy implementation (1879 lines)
-├── dashboard.html        # Liquid glass dashboard with OAuth UI (1023 lines)
+├── proxy.js              # Main proxy implementation (~2065 lines)
+├── dashboard.html        # Liquid glass dashboard with OAuth UI (~1209 lines)
 ├── .config/
-│   └── config.json       # Runtime configuration
+│   └── config.json       # Runtime configuration (auto-created)
 ├── package.json          # Project metadata (freebuff, node-forge, node-fetch, socks-proxy-agent)
 ├── start.cmd             # Auto-detect launcher (Bun preferred, Node fallback)
 ├── start-node.cmd        # Node.js-only launcher
@@ -28,12 +28,18 @@ FREEBUFF-PROXY/
 - `checkProxyVersion()` — Checks npm for latest proxy version; shows VBScript MsgBox alert and exits if outdated
 - User-Agent generators: `getApiUserAgent()`, `getChatUserAgent()`, `getAdsUserAgent()`
 
-### 2. Config System (lines 101-176)
+### 2. Config System (lines 161-314)
 
-- `loadConfig()` — Loads `.config/config.json` with env var overrides (`LISTEN_ADDR`, `UPSTREAM_BASE_URL`, `REQUEST_TIMEOUT`, `AUTH_TOKENS`, `API_KEYS`)
+- `loadConfig()` — Loads `.config/config.json` with env var overrides (`LISTEN_ADDR`, `UPSTREAM_BASE_URL`, `REQUEST_TIMEOUT`, `AUTH_TOKENS`, `API_KEYS`, `DISABLED_MODELS`)
 - `loadFreebuffCLITokens()` — Reads `~/.config/manicode/credentials.json`, extracts all `authToken` entries
-- `saveConfig()` — Writes current config back to `.config/config.json`
+- `saveConfig()` — Writes current config back to `.config/config.json`; auto-creates `.config/` dir if missing; creates backup (`config.backup.json`) on first write
 - `parseDuration()` — Parses duration strings like `15m`, `6h`, `30s`
+- `setupOpencodeConfig()` — Writes/updates opencode provider config:
+  - Iterates all model registry entries, skips any in `config.disabledModels`
+  - Adds `[LIM]` prefix to `name` for premium models (same convention as dashboard)
+  - Reads existing opencode.json before overwriting; if models are missing from the existing freebuff provider that are in the registry and not already disabled, they're auto-added to `config.disabledModels` and persisted via `saveConfig()` — this makes manual model removal from opencode.json persist across restarts
+  - Writes to `~/.config/opencode/opencode.json` (and `~/.opencode/opencode.json` on Windows)
+- `DISABLED_MODELS` — Config array of model IDs to exclude from the opencode provider; toggleable via dashboard
 - Auto-normalizes `codebuff.com` → `www.codebuff.com`
 
 ### 3. ModelRegistry (lines 178-280)
@@ -277,17 +283,18 @@ pollUntilReady() — up to 60 iterations
 Cache session keyed by {token}:{model}
 ```
 
-## Startup Sequence (startServer, lines 1250-1317)
+## Startup Sequence (startServer, lines 1982-2040)
 
 1. `loadConfig()` — Load `.config/config.json` + env vars
 2. `loadFreebuffCLITokens()` — Merge CLI tokens into config
 3. `checkAndUpdateVersions()` — Fetch latest version strings
 4. `new ModelRegistry()` + `.start()` — Fetch models from GitHub
-5. `validateAllTokens()` — Test each token
-6. `new TokenPool(validTokens, config, client)` — Initialize pool
-7. `http.createServer(handleRequest).listen(port)` — Start server
-8. `setInterval(tokenReload, 5min)` — Check for new CLI tokens
-9. `setInterval(versionCheck, 1hr)` — Update version strings
+5. `setupOpencodeConfig()` — Write opencode provider config (filters disabled models, adds `[LIM]` prefix for premium, detects manual removals)
+6. `validateAllTokens()` — Test each token
+7. `new TokenPool(validTokens, config, client)` — Initialize pool
+8. `http.createServer(handleRequest).listen(port)` — Start server
+9. `setInterval(tokenReload, 5min)` — Check for new CLI tokens
+10. `setInterval(versionCheck, 1hr)` — Update version strings
 
 ## Common Issues
 
@@ -413,6 +420,7 @@ Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 - [ ] Token expiration detection
 - [ ] Automatic token refresh
 - [x] Rate limiting — Global 1.3s debounce + 429 retry with progressive backoff
+- [x] Auto-configure opencode provider — Writes `opencode.json` on startup with `[LIM]` prefix for premium models, respects `DISABLED_MODELS`, syncs manual model removals back to config
 - [ ] Request/response logging
 - [ ] Metrics export (Prometheus)
 - [ ] Docker containerization

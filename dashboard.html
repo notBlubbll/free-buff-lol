@@ -895,13 +895,14 @@
         const configResponse = await fetch('/api/config');
         const configData = await configResponse.json();
         if (configData) {
-          config = configData;
-          disabledModels = Array.isArray(configData.disabledModels) ? configData.disabledModels : [];
-          if (document.getElementById('listenAddr')) document.getElementById('listenAddr').value = configData.listenAddr || ':8080';
-          if (document.getElementById('upstreamUrl')) document.getElementById('upstreamUrl').value = configData.upstreamBaseURL || 'https://www.codebuff.com';
-          if (document.getElementById('rotationInterval')) document.getElementById('rotationInterval').value = configData.rotationInterval || '6h';
-          if (document.getElementById('requestTimeout')) document.getElementById('requestTimeout').value = configData.requestTimeout || '15m';
-          if (document.getElementById('wallpaperToggle')) document.getElementById('wallpaperToggle').checked = configData.enableWallpaper !== false;
+          const cfg = configData.config || configData;
+          config = cfg;
+          disabledModels = Array.isArray(cfg.disabledModels) ? cfg.disabledModels : [];
+          if (document.getElementById('listenAddr')) document.getElementById('listenAddr').value = cfg.listenAddr || ':8080';
+          if (document.getElementById('upstreamUrl')) document.getElementById('upstreamUrl').value = cfg.upstreamBaseURL || 'https://www.codebuff.com';
+          if (document.getElementById('rotationInterval')) document.getElementById('rotationInterval').value = cfg.rotationInterval || '6h';
+          if (document.getElementById('requestTimeout')) document.getElementById('requestTimeout').value = cfg.requestTimeout || '15m';
+          if (document.getElementById('wallpaperToggle')) document.getElementById('wallpaperToggle').checked = cfg.enableWallpaper !== false;
         }
         const modelsResponse = await fetch('/api/models');
         const modelsData = await modelsResponse.json();

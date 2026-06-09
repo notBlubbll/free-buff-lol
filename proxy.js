@@ -290,16 +290,13 @@ function loadFreebuffCLITokens() {
   return tokens;
 }
 
-let configBackupDone = false;
 function saveConfig(cfg) {
-  const configPath = path.join(__dirname, '.config', 'config.json');
-  const backupPath = path.join(__dirname, '.config', 'config.backup.json');
-  if (!configBackupDone && !fs.existsSync(backupPath)) {
-    try {
-      fs.copyFileSync(configPath, backupPath);
-      console.log('Initial config backup created:', backupPath);
-    } catch (e) { console.error('Failed to create config backup:', e.message); }
-    configBackupDone = true;
+  const configDir = path.join(__dirname, '.config');
+  if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+  const configPath = path.join(configDir, 'config.json');
+  const backupPath = path.join(configDir, 'config.backup.json');
+  if (!fs.existsSync(backupPath) && fs.existsSync(configPath)) {
+    try { fs.copyFileSync(configPath, backupPath); } catch (e) { console.error('Failed to create config backup:', e.message); }
   }
   fs.writeFileSync(configPath, JSON.stringify({
     LISTEN_ADDR: cfg.listenAddr,
@@ -312,17 +309,6 @@ function saveConfig(cfg) {
 }
 
 function setupOpencodeConfig() {
-  const models = {};
-  for (const m of modelRegistry.getModels()) {
-    models[m] = { name: modelRegistry.getDisplayName(m) };
-  }
-  const providerEntry = {
-    npm: '@ai-sdk/openai-compatible',
-    name: 'Freebuff Proxy',
-    options: { baseURL: `http://localhost:${parseInt(config.listenAddr.replace(':', '')) || 8080}/v1` },
-    models
-  };
-
   const configPaths = [
     path.join(os.homedir(), '.config', 'opencode', 'opencode.json')
   ];
@@ -350,7 +336,34 @@ function setupOpencodeConfig() {
         console.log(`[Opencode] No existing config found, will create: ${configFile}`);
       }
       if (!existing.provider || typeof existing.provider !== 'object') existing.provider = {};
-      existing.provider['freebuff'] = providerEntry;
+      const existingModels = existing.provider['freebuff'] && existing.provider['freebuff'].models
+        ? Object.keys(existing.provider['freebuff'].models)
+        : null;
+      if (existingModels) {
+        const currentDisabled = new Set(config.disabledModels || []);
+        const newlyRemoved = modelRegistry.getModels().filter(m =>
+          !currentDisabled.has(m) && !existingModels.includes(m)
+        );
+        if (newlyRemoved.length > 0) {
+          config.disabledModels = [...new Set([...config.disabledModels, ...newlyRemoved])];
+          saveConfig(config);
+          for (const rm of newlyRemoved) console.log(`[Opencode] Detected manual removal of ${rm}, added to disabledModels`);
+        }
+      }
+      const disabledSet = new Set(config.disabledModels || []);
+      const models = {};
+      for (const m of modelRegistry.getModels()) {
+        if (disabledSet.has(m)) continue;
+        const meta = modelRegistry.getModelMetadata(m);
+        const name = meta && meta.premium ? `[LIM] ${modelRegistry.getDisplayName(m)}` : modelRegistry.getDisplayName(m);
+        models[m] = { name };
+      }
+      existing.provider['freebuff'] = {
+        npm: '@ai-sdk/openai-compatible',
+        name: 'Freebuff Proxy',
+        options: { baseURL: `http://localhost:${parseInt(config.listenAddr.replace(':', '')) || 8080}/v1` },
+        models
+      };
       fs.writeFileSync(configFile, JSON.stringify(existing, null, 2));
       console.log(`[Opencode] Config updated: ${configFile}`);
     } catch (e) {

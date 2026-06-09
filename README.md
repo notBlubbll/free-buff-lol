@@ -219,6 +219,7 @@ Edit `.config/config.json` or set environment variables:
 | `REQUEST_TIMEOUT` | Upstream request timeout | `15m` |
 | `API_KEYS` | Client API keys for proxy auth | `[]` (open access) |
 | `OUTBOUND_PROXY` | SOCKS5/HTTP proxy for outbound requests | `null` |
+| `DISABLED_MODELS` | Models to exclude from opencode provider config | `[]` |
 
 Environment variables override JSON config values.
 
@@ -291,24 +292,23 @@ const response = await fetch('http://localhost:8080/v1/messages', {
 
 ### opencode Integration
 
-Add the following to your `opencode.json` (located at `~/.config/opencode/opencode.json` or `./opencode.json`):
+The proxy **automatically configures** the opencode provider on startup. It writes to `~/.config/opencode/opencode.json` (and `~/.opencode/opencode.json` on Windows).
+
+The auto-config:
+- Includes only **non-disabled models** (respects `DISABLED_MODELS` in config)
+- Prefixes premium model display names with `[LIM]` (matching the dashboard convention)
+- Creates a backup (`openconfig.b4freebuff.json`) on first run
+- **Detects manual model removals** from opencode.json and syncs them into `DISABLED_MODELS` in `.config/config.json`
+
+To disable models, use the dashboard toggle or set `DISABLED_MODELS` in `.config/config.json`:
 
 ```json
 {
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "freebuff": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Freebuff Proxy",
-      "options": {
-        "baseURL": "http://localhost:8080/v1"
-      }
-    }
-  }
+  "DISABLED_MODELS": ["deepseek/deepseek-v4-pro"]
 }
 ```
 
-Restart opencode after editing the config file.
+Restart opencode after the proxy starts.
 
 ## Dashboard
 
@@ -317,7 +317,7 @@ Access the dashboard at `http://localhost:8080`:
 - **Liquid Glass Effects** — SVG displacement maps with canvas-generated refraction profiles
 - **Bing Wallpaper** — Daily rotating backgrounds via peapix.com
 - **OAuth Token Generation** — Browser-based authentication with auto-polling
-- **Toggleable Models** — Enable/disable models with checkboxes
+- **Toggleable Models** — Enable/disable models with checkboxes; changes persist to `.config/config.json` and propagate to opencode provider on restart
 - **Token Status** — View active tokens, sessions, instance IDs, country code, and remaining session time with live countdown
 - **Country Display** — Shows the upstream server's country code (e.g. `DE`) from the session response, with `>US` indicator when Warp Plus proxy is active
 - **Session Countdown** — Live `Xm Ys left` countdown in the Auth Token Status header, updated every second
@@ -377,15 +377,16 @@ dashboard.html (1023 lines)
 
 ## Startup Flow
 
-1. `loadConfig()` — Load `.config/config.json` + env vars
+1. `loadConfig()` — Load `.config/config.json` + env vars (auto-creates `.config/` if missing)
 2. `loadFreebuffCLITokens()` — Auto-detect CLI tokens from `~/.config/manicode/credentials.json`
 3. `checkAndUpdateVersions()` — Fetch latest versions from upstream sources
 4. `ModelRegistry.start()` — Fetch and parse model definitions from GitHub
-5. `validateAllTokens()` — Verify each token via `createSession()`
-6. `TokenPool` — Initialize with valid tokens
-7. `http.createServer()` — Start HTTP server
-8. `setInterval` — Token reload check every 5 minutes
-9. `setInterval` — Version check every 1 hour
+5. `setupOpencodeConfig()` — Write opencode provider config (respects `DISABLED_MODELS`, adds `[LIM]` for premium models, detects manual model removals and syncs to config)
+6. `validateAllTokens()` — Verify each token via `createSession()`
+7. `TokenPool` — Initialize with valid tokens
+8. `http.createServer()` — Start HTTP server
+9. `setInterval` — Token reload check every 5 minutes
+10. `setInterval` — Version check every 1 hour
 
 ## Troubleshooting
 
