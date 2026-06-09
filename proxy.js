@@ -1373,7 +1373,8 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
       if (proxyAgent) console.log('[Proxy] Routing chat through outbound proxy');
     }
 
-    console.log(`[Request] model: ${actualModel}, run: ${run.runId}, tier: ${accessTier || 'normal'}${proxyAgent ? ', via warp' : ''}`);
+    const requestedDisplay = actualModel !== requestedModel ? ` (locked from ${requestedModel})` : '';
+    console.log(`[Request] model: ${actualModel}${requestedDisplay}, run: ${run.runId}, tier: ${accessTier || 'normal'}${proxyAgent ? ', via warp' : ''}`);
     const userMsg = (payload.messages || []).find(m => m.role === 'user');
     if (userMsg) console.log(`[Prompt] ${typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content)}`);
 
@@ -1428,8 +1429,9 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
 
     if (resp.status >= 200 && resp.status < 300) {
       let messageId = null;
-      try { messageId = await writeSuccess(res, resp); } catch (e) { console.error(`proxy response copy failed: ${e.message}`); }
-      console.log(`Request completed in ${Date.now() - reqStart}ms (status: ${resp.status})`);
+      let actualResponseModel = null;
+      try { const result = await writeSuccess(res, resp); messageId = result.messageId; actualResponseModel = result.model; } catch (e) { console.error(`proxy response copy failed: ${e.message}`); }
+      console.log(`[Response] model: ${actualResponseModel || actualModel}, completed in ${Date.now() - reqStart}ms (status: ${resp.status})`);
       setImmediate(() => finalizeRunChainNormal(client, token, run, messageId));
       return;
     }
@@ -1546,31 +1548,75 @@ async function writeOpenAISuccessResponse(res, resp) {
   }
   res.writeHead(resp.status);
   let messageId = null;
+  let model = null;
 
   if (resp.headers['content-type']?.includes('text/event-stream')) {
-    await pipeBodyToResponse(resp.body, res);
+    const body = resp.body;
+    model = await pipeBodyToResponseAndCaptureModel(body, res);
   } else {
     const buffer = await readBodyText(resp.body);
     res.end(buffer);
-    try { const parsed = JSON.parse(buffer); if (parsed.id) messageId = parsed.id; } catch (e) {}
+    try { const parsed = JSON.parse(buffer); if (parsed.id) messageId = parsed.id; if (parsed.model) model = parsed.model; } catch (e) {}
   }
 
-  return messageId;
+  return { messageId, model };
+}
+
+async function pipeBodyToResponseAndCaptureModel(body, res) {
+  let model = null;
+  let buffer = '';
+  let captured = false;
+
+  function processChunk(chunk) {
+    const str = chunk instanceof Buffer ? chunk.toString() : typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+    if (!captured) {
+      buffer += str;
+      const match = buffer.match(/data:\s*(\{.*?\})\n\n/);
+      if (match) {
+        captured = true;
+        try { const parsed = JSON.parse(match[1]); if (parsed.model) model = parsed.model; } catch (_) {}
+        res.write(Buffer.from(buffer));
+        buffer = '';
+        return;
+      }
+    }
+    res.write(chunk instanceof Buffer ? chunk : Buffer.from(typeof chunk === 'string' ? chunk : chunk));
+  }
+
+  if (isNodeStream(body)) {
+    return new Promise((resolve, reject) => {
+      body.on('data', chunk => { processChunk(chunk); });
+      body.on('end', () => { if (!captured) { res.write(Buffer.from(buffer)); } res.end(); resolve(model); });
+      body.on('error', reject);
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const reader = body.getReader();
+    function pump() {
+      reader.read().then(({ done, value }) => {
+        if (done) { if (!captured) { res.write(Buffer.from(buffer)); } res.end(); resolve(model); return; }
+        processChunk(value);
+        pump();
+      }).catch(reject);
+    }
+    pump();
+  });
 }
 
 async function writeClaudeSuccessResponse(res, resp, requestedModel, stream) {
   if (stream) {
     res.writeHead(resp.status, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
-    await pipeBodyToResponse(resp.body, res);
-    return null;
+    const model = await pipeBodyToResponseAndCaptureModel(resp.body, res);
+    return { messageId: null, model };
   }
   const body = await readBodyText(resp.body);
   const converted = convertOpenAINonStreamResponseToClaude(body);
   res.writeHead(resp.status, { 'Content-Type': 'application/json' });
   res.end(converted);
   let messageId = null;
-  try { const parsed = JSON.parse(body); if (parsed.id) messageId = parsed.id; } catch (e) {}
-  return messageId;
+  let model = null;
+  try { const parsed = JSON.parse(body); if (parsed.id) messageId = parsed.id; if (parsed.model) model = parsed.model; } catch (e) {}
+  return { messageId, model };
 }
 
 // --- Anthropic Conversion ---
