@@ -17,13 +17,16 @@ const TOKEN_RELOAD_INTERVAL = 5 * 60 * 1000;
 const CONTEXT_PRUNER_AGENT_ID = 'context-pruner';
 const FREEBUFF2API_RS_SOURCE = 'https://raw.githubusercontent.com/XxxXTeam/freebuff2api_rs/main/src/codebuff.rs';
 
+const PROXY_VERSION = '1.0.0';
+const NPM_PACKAGE_NAME = 'freebuff-proxy';
+
 const IS_BUN = typeof Bun !== 'undefined';
 const RUNTIME_VERSION = IS_BUN ? Bun.version : process.version.replace('v', '');
 
 let BUN_VERSION = '1.3.11';
-let AI_SDK_COMPAT_VERSION = '0.0.0-test';
 let AI_SDK_PROVIDER_UTILS_VERSION = '3.0.20';
 let FREEBUFF_CLI_VERSION = '0.0.96';
+let AI_SDK_COMPAT_VERSION = FREEBUFF_CLI_VERSION;
 let DETECTED_COUNTRY = null;
 
 let LAST_REQUEST = 0;
@@ -51,8 +54,8 @@ const FALLBACK_AGENT_IDS = {
   'moonshotai/kimi-k2.6': 'base2-free-kimi',
   'deepseek/deepseek-v4-pro': 'base2-free-deepseek',
   'deepseek/deepseek-v4-flash': 'base2-free-deepseek-flash',
-  'mimo/mimo-v2.5-pro': 'base2-free',
-  'mimo/mimo-v2.5': 'base2-free',
+  'mimo/mimo-v2.5-pro': 'base2-free-mimo-pro',
+  'mimo/mimo-v2.5': 'base2-free-mimo',
 };
 
 function canonicalModelName(model) {
@@ -60,7 +63,9 @@ function canonicalModelName(model) {
 }
 
 function getApiUserAgent() { return `Bun/${BUN_VERSION}`; }
-function getChatUserAgent() { return `ai-sdk/openai-compatible/${AI_SDK_COMPAT_VERSION}/codebuff ai-sdk/provider-utils/${AI_SDK_PROVIDER_UTILS_VERSION} runtime/browser`; }
+function getChatUserAgent() {
+  return `ai-sdk/openai-compatible/0.0.0-test/codebuff ai-sdk/provider-utils/${AI_SDK_PROVIDER_UTILS_VERSION} runtime/browser`;
+}
 function getAdsUserAgent() { return `Freebuff-CLI/${FREEBUFF_CLI_VERSION}`; }
 
 async function httpGet(url, options = {}) {
@@ -86,11 +91,6 @@ async function checkAndUpdateVersions() {
         updates.push(`Bun: ${BUN_VERSION} -> ${bunMatch[1]}`);
         BUN_VERSION = bunMatch[1];
       }
-      const cliMatch = data.match(/"Freebuff-CLI\/(\d+\.\d+\.\d+)"/);
-      if (cliMatch && cliMatch[1] !== FREEBUFF_CLI_VERSION) {
-        updates.push(`Freebuff-CLI: ${FREEBUFF_CLI_VERSION} -> ${cliMatch[1]}`);
-        FREEBUFF_CLI_VERSION = cliMatch[1];
-      }
     }
   } catch (e) {
     console.error(`[Versions] Failed to fetch RS source: ${e.message}`);
@@ -104,6 +104,7 @@ async function checkAndUpdateVersions() {
         if (pkg.version && pkg.version !== FREEBUFF_CLI_VERSION) {
           updates.push(`Freebuff-CLI: ${FREEBUFF_CLI_VERSION} -> ${pkg.version}`);
           FREEBUFF_CLI_VERSION = pkg.version;
+          AI_SDK_COMPAT_VERSION = pkg.version;
         }
       } catch (e) {}
     }
@@ -116,6 +117,44 @@ async function checkAndUpdateVersions() {
     return true;
   }
   return false;
+}
+
+function versionCompare(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+    if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+  }
+  return 0;
+}
+
+async function checkProxyVersion() {
+  try {
+    const { status, data } = await httpGet(`https://registry.npmjs.org/${NPM_PACKAGE_NAME}/latest`);
+    if (status !== 200) return;
+    const pkg = JSON.parse(data);
+    const latest = pkg.version;
+    if (!latest || versionCompare(latest, PROXY_VERSION) <= 0) return;
+
+    const msg = `Freebuff Proxy is outdated!\n\nCurrent: v${PROXY_VERSION}\nLatest:  v${latest}\n\nUpdate with: npm install -g ${NPM_PACKAGE_NAME}\nor: cd ${__dirname} && npm install\n\nThe proxy will now close.`;
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`  OUTDATED: v${PROXY_VERSION} -> v${latest}`);
+    console.log(`  Update: npm install -g ${NPM_PACKAGE_NAME}`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    if (process.platform === 'win32') {
+      const vbsPath = path.join(os.tmpdir(), 'freebuff_alert.vbs');
+      fs.writeFileSync(vbsPath, `MsgBox "Freebuff Proxy is outdated!" & vbCrLf & vbCrLf & "Current: v${PROXY_VERSION}" & vbCrLf & "Latest:  v${latest}" & vbCrLf & vbCrLf & "Run: npm install -g ${NPM_PACKAGE_NAME}", vbExclamation, "Freebuff Proxy - Update Required"`);
+      const { execSync } = require('child_process');
+      try { execSync(`cscript //nologo "${vbsPath}"`, { timeout: 30000 }); } catch {}
+      try { fs.unlinkSync(vbsPath); } catch {}
+    }
+
+    process.exit(1);
+  } catch (e) {
+    // silent fail
+  }
 }
 
 let config = null;
@@ -151,6 +190,7 @@ function loadConfig() {
   if (process.env.AUTH_TOKENS) rawConfig.AUTH_TOKENS = process.env.AUTH_TOKENS.split(',').map(t => t.trim()).filter(Boolean);
   if (process.env.API_KEYS) rawConfig.API_KEYS = process.env.API_KEYS.split(',').map(t => t.trim()).filter(Boolean);
   if (process.env.WARP_PLUS !== undefined) rawConfig.WARP_PLUS = process.env.WARP_PLUS === 'true';
+  if (process.env.OUTBOUND_PROXY) rawConfig.OUTBOUND_PROXY = process.env.OUTBOUND_PROXY;
   if (!rawConfig.AUTH_TOKENS || rawConfig.AUTH_TOKENS.length === 0) {
     const cliTokens = loadFreebuffCLITokens();
     if (cliTokens.length > 0) { rawConfig.AUTH_TOKENS = cliTokens; console.log(`Loaded ${cliTokens.length} token(s) from Freebuff CLI`); }
@@ -168,6 +208,7 @@ function loadConfig() {
     requestTimeout,
     apiKeys: [...new Set(rawConfig.API_KEYS || [])],
     warpPlus: rawConfig.WARP_PLUS !== false,
+    outboundProxy: rawConfig.OUTBOUND_PROXY || null,
     disabledModels: Array.isArray(rawConfig.DISABLED_MODELS) ? rawConfig.DISABLED_MODELS : []
   };
 }
@@ -341,12 +382,14 @@ class ModelRegistry {
 
   async refresh() {
     // --- HARDCODED MODELS (remote fetching disabled) ---
+    // Based on upstream Codebuff free-tier agents:
+    //   github.com/CodebuffAI/codebuff/blob/main/common/src/constants/free-agents.ts
     const HARDCODED_MODELS = [
-      { model: 'deepseek/deepseek-v4-pro', agent: 'base2-free-deepseek', displayName: '[LIM] DeepSeek V4 Pro' },
-      { model: 'mimo/mimo-v2.5-pro', agent: 'base2-free', displayName: '[LIM] MiMo 2.5 Pro' },
-      { model: 'moonshotai/kimi-k2.6', agent: 'base2-free-kimi', displayName: '[LIM] Kimi K2.6' },
+      { model: 'deepseek/deepseek-v4-pro', agent: 'base2-free-deepseek', displayName: 'DeepSeek V4 Pro' },
+      { model: 'mimo/mimo-v2.5-pro', agent: 'base2-free-mimo-pro', displayName: 'MiMo 2.5 Pro' },
+      { model: 'moonshotai/kimi-k2.6', agent: 'base2-free-kimi', displayName: 'Kimi K2.6' },
       { model: 'deepseek/deepseek-v4-flash', agent: 'base2-free-deepseek-flash', displayName: 'DeepSeek V4 Flash' },
-      { model: 'mimo/mimo-v2.5', agent: 'base2-free', displayName: 'MiMo 2.5' },
+      { model: 'mimo/mimo-v2.5', agent: 'base2-free-mimo', displayName: 'MiMo 2.5' },
       { model: 'minimax/minimax-m2.7', agent: 'base2-free', displayName: 'MiniMax M2.7' },
     ];
 
@@ -632,6 +675,28 @@ class WarpPlusManager {
 
 const warpPlus = new WarpPlusManager();
 
+let outboundProxyAgent = null;
+function getOutboundProxyAgent() {
+  if (outboundProxyAgent) return outboundProxyAgent;
+  const proxyUrl = config && config.outboundProxy;
+  if (!proxyUrl) return null;
+  try {
+    if (proxyUrl.startsWith('socks5://') || proxyUrl.startsWith('socks5h://')) {
+      outboundProxyAgent = new SocksProxyAgent(proxyUrl);
+    } else if (proxyUrl.startsWith('http://') || proxyUrl.startsWith('https://')) {
+      const { HttpsProxyAgent } = require('https-proxy-agent');
+      outboundProxyAgent = new HttpsProxyAgent(proxyUrl);
+    } else {
+      outboundProxyAgent = new SocksProxyAgent('socks5://' + proxyUrl);
+    }
+    console.log(`[Proxy] Outbound proxy configured: ${proxyUrl.replace(/\/\/[^@]*@/, '//***@')}`);
+    return outboundProxyAgent;
+  } catch (e) {
+    console.error(`[Proxy] Failed to create outbound proxy agent: ${e.message}`);
+    return null;
+  }
+}
+
 // --- Upstream Client ---
 class UpstreamClient {
   constructor(cfg) {
@@ -651,15 +716,8 @@ class UpstreamClient {
     return {
       'Authorization': `Bearer ${authToken}`,
       'Content-Type': 'application/json',
-      'Accept': stream ? 'text/event-stream' : 'application/json',
-    };
-  }
-
-  chatHeaders(authToken, stream = false) {
-    return {
-      'Authorization': `Bearer ${authToken}`,
-      'Content-Type': 'application/json',
-      'Accept': stream ? 'text/event-stream' : 'application/json',
+      'Accept': '*/*',
+      'User-Agent': getChatUserAgent(),
     };
   }
 
@@ -716,15 +774,15 @@ class UpstreamClient {
     const headers = this.chatHeaders(authToken, isStream);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout);
-    const fetchFn = proxyAgent ? nodeFetch : fetch;
     const fetchOpts = {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: controller.signal
+      signal: controller.signal,
+      compress: false,
     };
     if (proxyAgent) fetchOpts.agent = proxyAgent;
-    return fetchFn(requestURL, fetchOpts).then(resp => {
+    return nodeFetch(requestURL, fetchOpts).then(resp => {
       clearTimeout(timer);
       const responseHeaders = {};
       resp.headers.forEach((v, k) => responseHeaders[k] = v);
@@ -784,6 +842,7 @@ class TokenPool {
     this.client = client;
     this.currentIndex = 0;
     this.sessions = new Map();
+    this.lockedModels = new Map();
     this.mutex = Promise.resolve();
   }
 
@@ -806,6 +865,11 @@ class TokenPool {
   sessionKey(token, model) { return `${token}:${model}`; }
 
   async ensureSession(token, model) {
+    const locked = await this.withLock(async () => this.lockedModels.get(token));
+    if (locked && locked !== model) {
+      console.log(`${token.substring(0, 8)}...: token locked to ${locked}, redirecting from ${model}`);
+      model = locked;
+    }
     let key = this.sessionKey(token, model);
     for (let i = 0; i < 3; i++) {
       const ready = await this.withLock(async () => {
@@ -852,7 +916,7 @@ class TokenPool {
           if (lockedModel) {
             console.log(`${key.substring(0, 20)}...: server locked to ${lockedModel}, switching model`);
             const newKey = this.sessionKey(token, lockedModel);
-            await this.withLock(async () => { this.sessions.delete(key); });
+            await this.withLock(async () => { this.sessions.delete(key); this.lockedModels.set(token, lockedModel); });
             model = lockedModel;
             key = newKey;
             continue;
@@ -874,6 +938,14 @@ class TokenPool {
         if (i === 2) throw e;
       }
     }
+  }
+
+  async getLockedModel(token) {
+    return await this.withLock(async () => this.lockedModels.get(token) || null);
+  }
+
+  async setLockedModel(token, model) {
+    await this.withLock(async () => { this.lockedModels.set(token, model); });
   }
 
   async endAllSessionsForToken(token) {
@@ -1187,7 +1259,8 @@ async function handleHealthz(req, res) {
       running: warpPlus.isReady(),
       port: WARP_PLUS_PORT,
       exit_country: (warpPlus.isReady() || warpPlus.lastEndpoint) ? 'US' : null
-    }
+    },
+    outbound_proxy: config.outboundProxy ? config.outboundProxy.replace(/\/\/[^@]*@/, '//***@') : null
   });
 }
 
@@ -1295,19 +1368,30 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
         }
       }
     }
+    if (!proxyAgent) {
+      proxyAgent = getOutboundProxyAgent();
+      if (proxyAgent) console.log('[Proxy] Routing chat through outbound proxy');
+    }
 
     console.log(`[Request] model: ${actualModel}, run: ${run.runId}, tier: ${accessTier || 'normal'}${proxyAgent ? ', via warp' : ''}`);
+    const userMsg = (payload.messages || []).find(m => m.role === 'user');
+    if (userMsg) console.log(`[Prompt] ${typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content)}`);
 
     const cloned = cloneMap(payload);
     cloned.model = actualModel;
 
     if (cloned.tools) normalizeToolSchemas(cloned.tools);
 
-    if (!cloned.codebuff_metadata || typeof cloned.codebuff_metadata !== 'object') cloned.codebuff_metadata = {};
-    cloned.codebuff_metadata.run_id = run.runId;
-    cloned.codebuff_metadata.cost_mode = 'free';
-    cloned.codebuff_metadata.client_id = generateClientSessionId();
-    if (sessionInstanceID) cloned.codebuff_metadata.freebuff_instance_id = sessionInstanceID;
+    const clientId = generateClientSessionId();
+    if (cloned.stream === undefined) cloned.stream = true;
+    cloned.codebuff_metadata = {
+      run_id: run.runId,
+      client_id: clientId,
+      ...(sessionInstanceID ? { freebuff_instance_id: sessionInstanceID } : {}),
+      trace_session_id: crypto.randomUUID(),
+    };
+    cloned.provider = { order: 0, allow_fallbacks: true, data_collection: 'deny' };
+    if (!cloned.stop) cloned.stop = ['"cb_easp"'];
 
     let resp;
     try { resp = await client.chatCompletions(token, cloned, proxyAgent); } catch (e) {
@@ -1359,7 +1443,16 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
       try {
         const errorData = JSON.parse(errorBodyStr);
         errorType = errorData.error || '';
-        if (errorType === 'session_model_mismatch') lockedModel = errorData.lockedModel || 'deepseek/deepseek-v4-flash';
+        if (errorType === 'session_model_mismatch') {
+          lockedModel = errorData.lockedModel || null;
+          if (!lockedModel) {
+            const cached = await tokenPool.getLockedModel(token);
+            if (cached) lockedModel = cached;
+          }
+          if (!lockedModel) {
+            try { const parsed = JSON.parse(errorBodyStr); if (parsed.body && parsed.body.currentModel) lockedModel = parsed.body.currentModel; } catch (_) {}
+          }
+        }
       } catch (e) {}
       console.log(`[Session Invalid] status=${resp.status}, error=${errorType}${lockedModel ? ', lockedModel=' + lockedModel : ''}`);
       
@@ -1369,6 +1462,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
       tokenPool.invalidateSession(token, actualModel);
       if (lockedModel) {
         console.log(`[Model Lock] Switching from ${currentModel} to ${lockedModel}`);
+        await tokenPool.setLockedModel(token, lockedModel);
         currentModel = lockedModel;
       }
       continue;
@@ -1665,7 +1759,7 @@ async function handleRequest(req, res) {
       };
       const resp = await fetch(config.upstreamBaseURL + '/api/v1/ads', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'Freebuff-CLI/0.0.96', 'Accept': 'application/json' },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': getAdsUserAgent(), 'Accept': 'application/json' },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(15000)
       });
@@ -1685,7 +1779,7 @@ async function handleRequest(req, res) {
       const { impUrl, mode } = JSON.parse(body);
       const resp = await fetch(config.upstreamBaseURL + '/api/v1/ads/impression', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'Freebuff-CLI/0.0.96', 'Accept': 'application/json' },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': getAdsUserAgent(), 'Accept': 'application/json' },
         body: JSON.stringify({ impUrl, mode: mode || 'LITE' }),
         signal: AbortSignal.timeout(10000)
       });
@@ -1747,6 +1841,7 @@ async function startServer() {
   }
 
   await checkAndUpdateVersions();
+  await checkProxyVersion();
 
   detectCountry().catch(() => {});
 
@@ -1780,6 +1875,7 @@ async function startServer() {
     console.log(`  API keys: ${config.apiKeys.length > 0 ? config.apiKeys.length + ' (auth enabled)' : 'none (open access)'}`);
     console.log(`  Valid tokens: ${validTokens.length}`);
     console.log(`  Warp Plus: ${config.warpPlus ? 'enabled (auto-start on limit)' : 'disabled'}`);
+    if (config.outboundProxy) console.log(`  Outbound Proxy: ${config.outboundProxy.replace(/\/\/[^@]*@/, '//***@')}`);
     console.log('');
   });
 
@@ -1800,7 +1896,8 @@ async function startServer() {
   }, TOKEN_RELOAD_INTERVAL);
 
   setInterval(async () => {
-    try {   await checkAndUpdateVersions(); } catch (e) { /* ignore */ }
+    try { await checkAndUpdateVersions(); } catch (e) { /* ignore */ }
+    try { await checkProxyVersion(); } catch (e) { /* ignore */ }
   }, 60 * 60 * 1000);
 }
 

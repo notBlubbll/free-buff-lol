@@ -27,7 +27,7 @@ country detection + bypass:<br>
 - **Tool Schema Normalization** — Resolves `$ref` and `definitions` in tool schemas before forwarding
 - **Dashboard UI** — Liquid glass effects, Bing wallpaper, OAuth flow, toggleable models
 - **Ad Integration** — Fetches and displays upstream ads in the dashboard
-- **Version Auto-Update** — Tracks Bun, Freebuff CLI, and SDK versions from upstream sources
+- **Version Auto-Update** — Tracks Bun, Freebuff CLI, and SDK versions from upstream sources; shows Windows alert and exits if proxy is outdated
 - **Auto-Config** — Automatically configures opencode provider on startup
 - **Warp Plus Proxy** — SOCKS5 proxy via Cloudflare WARP for bypassing rate limits on limited-tier sessions
 - **Request Debounce** — Global 1.3s minimum gap between requests to prevent upstream rate limiting
@@ -67,6 +67,14 @@ Models are toggleable in the dashboard UI.
 **DeepSeek models collect your data for training.** The upstream Freebuff source explicitly marks both `deepseek/deepseek-v4-pro` and `deepseek/deepseek-v4-flash` with the warning: `"Collects data for training"`. This means your prompts, code, and chat content sent through these models may be used by DeepSeek to train their models.
 
 If you are working with sensitive, proprietary, or confidential code, **avoid DeepSeek models**. Use `minimax/minimax-m2.7` or `moonshotai/kimi-k2.6` instead — these do not carry the training data warning.
+
+### Account Ban Risk
+
+**Using this proxy violates Freebuff's terms of service.** The upstream server explicitly rejects direct API calls:
+
+> `403 error: "Free mode is only available through the freebuff CLI. Install it with 'npm i -g freebuff', then run 'freebuff'. Calling the API directly is not supported and may get your account banned."`
+
+This proxy works by omitting the `cost_mode` field from requests, which bypasses the CLI-only check but does NOT make it authorized. **Your Freebuff/Codebuff account may be banned** at any time if they detect unusual usage patterns. Use at your own risk.
 
 ### What Freebuff/Codebuff Collects
 
@@ -210,6 +218,7 @@ Edit `.config/config.json` or set environment variables:
 | `AUTH_TOKENS` | Freebuff auth tokens (array) | `[]` |
 | `REQUEST_TIMEOUT` | Upstream request timeout | `15m` |
 | `API_KEYS` | Client API keys for proxy auth | `[]` (open access) |
+| `OUTBOUND_PROXY` | SOCKS5/HTTP proxy for outbound requests | `null` |
 
 Environment variables override JSON config values.
 
@@ -435,6 +444,8 @@ If you see `session_model_mismatch` errors:
 - `node-forge` (^1.4.0) — Cryptographic operations
 - `node-fetch` (^2.7.0) — HTTP client with SOCKS5 proxy support
 - `socks-proxy-agent` (^8.0.0) — SOCKS5 proxy agent for Warp Plus
+- `https-proxy-agent` (^9.1.0) — HTTP CONNECT proxy support
+- `socks` (^2.8.9) — SOCKS protocol implementation
 
 Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 

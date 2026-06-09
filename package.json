@@ -19,6 +19,7 @@
   "license": "MIT",
   "dependencies": {
     "freebuff": "^0.0.96",
+    "https-proxy-agent": "^9.1.0",
     "node-fetch": "^2.7.0",
     "node-forge": "^1.4.0",
     "socks": "^2.8.9",

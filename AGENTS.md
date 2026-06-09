@@ -4,7 +4,7 @@
 
 ```
 FREEBUFF-PROXY/
-├── proxy.js              # Main proxy implementation (1646 lines)
+├── proxy.js              # Main proxy implementation (1879 lines)
 ├── dashboard.html        # Liquid glass dashboard with OAuth UI (1023 lines)
 ├── .config/
 │   └── config.json       # Runtime configuration
@@ -20,11 +20,12 @@ FREEBUFF-PROXY/
 ### 1. Constants & Version Tracking (lines 1-99)
 
 - Source URLs for GitHub TypeScript files and Rust reference
-- Version constants: `BUN_VERSION`, `FREEBUFF_CLI_VERSION`, `AI_SDK_COMPAT_VERSION`
+- Version constants: `BUN_VERSION`, `FREEBUFF_CLI_VERSION`, `AI_SDK_COMPAT_VERSION`, `PROXY_VERSION`
 - `CANONICAL_MODEL_ALIASES` — Maps shorthand model names to full IDs (e.g. `deepseek-v4-pro` → `deepseek/deepseek-v4-pro`)
 - `FALLBACK_AGENT_IDS` — Hardcoded model-to-agent mapping when registry unavailable
 - `LAST_REQUEST` / `debounceRequest()` — Global request debounce (1.3s minimum gap between requests)
 - `checkAndUpdateVersions()` — Fetches `freebuff2api_rs` source and npm registry to auto-update version strings
+- `checkProxyVersion()` — Checks npm for latest proxy version; shows VBScript MsgBox alert and exits if outdated
 - User-Agent generators: `getApiUserAgent()`, `getChatUserAgent()`, `getAdsUserAgent()`
 
 ### 2. Config System (lines 101-176)
@@ -50,7 +51,7 @@ FREEBUFF-PROXY/
 - `startRun(authToken, agentID, ancestorRunIds)` — `POST /api/v1/agent-runs` with `action: 'START'`
 - `finishRun(authToken, runID, totalSteps)` — `POST /api/v1/agent-runs` with `action: 'FINISH'`
 - `recordRunStep(authToken, runID, stepNumber, childRunIds, messageId, startTime)` — `POST /api/v1/agent-runs/{id}/steps`
-- `chatCompletions(authToken, body, proxyAgent)` — `POST /api/v1/chat/completions` (streaming-aware, uses `node-fetch` + `SocksProxyAgent` when proxyAgent provided, global `fetch` otherwise)
+- `chatCompletions(authToken, body, proxyAgent)` — `POST /api/v1/chat/completions` (streaming-aware, uses `node-fetch` + `SocksProxyAgent` when proxyAgent provided, `node-fetch` always)
 - `createSession(authToken, model, proxyAgent, countryCode)` — `POST /api/v1/freebuff/session`
 - `getSession(authToken, instanceID, proxyAgent)` — `GET /api/v1/freebuff/session` with `x-freebuff-instance-id` header
 - `endSession(authToken, instanceID)` — `DELETE /api/v1/freebuff/session`
@@ -130,9 +131,9 @@ Finalization:
   2. Ensure session (with retry)
   3. Resolve agent ID from model
   4. Start run chain
-  5. Clone payload, inject `codebuff_metadata` (run_id, cost_mode, client_id, instance_id)
+  5. Clone payload, inject `codebuff_metadata` (run_id, client_id, instance_id, trace_session_id) and `provider` (order, allow_fallbacks, data_collection)
   6. Normalize tool schemas
-  7. Forward to upstream
+  7. Forward to upstream (always via `node-fetch`)
   8. Handle success (streaming or non-streaming)
   9. On 429: retry up to 3 times with progressive delay (3s, 6s, 9s)
   10. On error: invalidate session or retry if run expired
@@ -245,7 +246,7 @@ Start run chain (normal)
     ├─ Record + finish child
     └─ Record step on parent
     ↓
-Clone payload, inject codebuff_metadata
+Clone payload, inject codebuff_metadata (run_id, client_id, instance_id, trace_session_id) and provider (order, allow_fallbacks, data_collection)
 Normalize tool schemas ($ref resolution)
     ↓
 Forward to upstream /api/v1/chat/completions
@@ -326,6 +327,20 @@ The `readBodyText()` function handles both: it checks for Node streams (`.pipe`/
 
 When adding new upstream calls, always use `readBodyText()` instead of `resp.body.text()` or `resp.text()` to avoid crashes.
 
+### Running Commands in Background
+
+Always run long-lived commands (proxy, dev servers, watchers) in the background to prevent shell hangup. Use `Start-Process` or run detached:
+
+```powershell
+# Good: Background process that won't block
+Start-Process -FilePath "bun" -ArgumentList "run", "proxy.js" -WindowStyle Hidden
+
+# Bad: Foreground process that blocks the terminal
+bun run proxy.js
+```
+
+If a process must run in the terminal, ensure it's detached or use `&` in Unix shells. On Windows, `start.cmd` handles this automatically.
+
 ## Testing
 
 ```bash
@@ -359,7 +374,9 @@ curl -X POST http://localhost:8080/v1/messages \
   "freebuff": "^0.0.96",
   "node-forge": "^1.4.0",
   "node-fetch": "^2.7.0",
-  "socks-proxy-agent": "^8.0.0"
+  "socks-proxy-agent": "^8.0.0",
+  "https-proxy-agent": "^9.1.0",
+  "socks": "^2.8.9"
 }
 ```
 
