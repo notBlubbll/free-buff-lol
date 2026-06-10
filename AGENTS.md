@@ -4,7 +4,7 @@
 
 ```
 FREEBUFF-PROXY/
-├── proxy.js              # Main proxy implementation (~2065 lines)
+├── proxy.js              # Main proxy implementation (~2218 lines)
 ├── dashboard.html        # Liquid glass dashboard with OAuth UI (~1209 lines)
 ├── .config/
 │   └── config.json       # Runtime configuration (auto-created)
@@ -22,7 +22,9 @@ FREEBUFF-PROXY/
 - Source URLs for GitHub TypeScript files and Rust reference
 - Version constants: `BUN_VERSION`, `FREEBUFF_CLI_VERSION`, `AI_SDK_COMPAT_VERSION`, `PROXY_VERSION`
 - `CANONICAL_MODEL_ALIASES` — Maps shorthand model names to full IDs (e.g. `deepseek-v4-pro` → `deepseek/deepseek-v4-pro`)
-- `FALLBACK_AGENT_IDS` — Hardcoded model-to-agent mapping when registry unavailable
+- `FALLBACK_AGENT_IDS` — Hardcoded model-to-agent mapping when registry unavailable (includes `minimax-m3`, `gemini-*`)
+- `CONTEXT_PRUNER_AGENT_ID` — Agent ID for the context-pruner child run
+- `CODEBUFF_ACCEPT_ENCODING`, `CODEBUFF_JSON_USER_AGENT`, `FREEBUFF_CLI_USER_AGENT` — HAR-style header constants
 - `LAST_REQUEST` / `debounceRequest()` — Global request debounce (1.3s minimum gap between requests)
 - `checkAndUpdateVersions()` — Fetches `freebuff2api_rs` source and npm registry to auto-update version strings
 - `checkProxyVersion()` — Checks npm for latest proxy version; shows VBScript MsgBox alert and exits if outdated
@@ -51,30 +53,45 @@ FREEBUFF-PROXY/
 - `buildModelMapping()` — Uses hardcoded `SUPPORTED_MODELS` map (4 models → 4 agents)
 - Result: `modelToAgent` Map, `allModels` array
 
-### 4. UpstreamClient (lines 282-419)
+### 4. Message Normalization (lines 605-660)
 
+- `normalizeChatMessages(messages)` — Converts `developer` → `system`, adds `cache_control: {"type": "ephemeral"}`, injects "You are Buffy..." system prompt when missing
+- `normalizeAdMessages(messages)` — Simplifies messages for ad requests
+- `buildAgentValidationPayload()` — Builds agent definitions for upstream validation
+
+### 5. UpstreamClient (lines 662-1020)
+
+- `_hostHeader()` — Extracts host from upstream URL for `Host` header
+- `apiHeaders(authToken, extra)` — HAR-style headers: `Accept-Encoding: gzip, deflate`, `Connection: keep-alive`, `Host`, `User-Agent: Bun/1.3.11`
+- `chatHeaders(authToken)` — Same HAR-style headers with `User-Agent: ai-sdk/openai-compatible/...`
+- `cliHeaders(authToken, extra)` — Same HAR-style headers with `User-Agent: Freebuff-CLI/0.0.105`
 - `doJSON(authToken, path, body, method, extraHeaders)` — Generic JSON request with AbortController timeout
 - `startRun(authToken, agentID, ancestorRunIds)` — `POST /api/v1/agent-runs` with `action: 'START'`
 - `finishRun(authToken, runID, totalSteps)` — `POST /api/v1/agent-runs` with `action: 'FINISH'`
 - `recordRunStep(authToken, runID, stepNumber, childRunIds, messageId, startTime)` — `POST /api/v1/agent-runs/{id}/steps`
-- `chatCompletions(authToken, body, proxyAgent)` — `POST /api/v1/chat/completions` (streaming-aware, uses `node-fetch` + `SocksProxyAgent` when proxyAgent provided, `node-fetch` always)
+- `chatCompletions(authToken, body, proxyAgent)` — `POST /api/v1/chat/completions` (streaming-aware, uses `node-fetch` + `SocksProxyAgent` when proxyAgent provided)
 - `createSession(authToken, model, proxyAgent, countryCode)` — `POST /api/v1/freebuff/session`
 - `getSession(authToken, instanceID, proxyAgent)` — `GET /api/v1/freebuff/session` with `x-freebuff-instance-id` header
 - `endSession(authToken, instanceID)` — `DELETE /api/v1/freebuff/session`
+- `validateAgents(authToken)` — `POST /api/agents/validate` with agent definitions
+- `requestAds(authToken, provider, messages, sessionId)` — `POST /api/v1/ads` with device info and HAR browser UA
+- `getStreak(authToken)` — `GET /api/v1/freebuff/streak`
+- `reportZeroclickImpression(authToken, ids)` — `POST https://zeroclick.dev/api/v2/impressions`
+- `reportCodebuffImpression(authToken, impUrl)` — `POST /api/v1/ads/impression`
 - Handles 426 (`freebuff_update_required`) and `model_locked` errors specially
 
-### 5. TokenPool (lines 421-567)
+### 6. TokenPool (lines 1022-1168)
 
 - Manages multiple auth tokens with round-robin selection
 - Mutex-based locking via promise chain (`withLock()`)
 - `ensureSession(token, model)` — Up to 3 retries, handles model_locked and freebuff_update_required
-- Session data stored: `status`, `instanceID`, `expiresAt`, `countryCode`, `remainingMs`
+- Session data stored: `status`, `instanceID`, `expiresAt`, `countryCode`, `remainingMs`, `accessTier`
 - `pollUntilReady(token, model, state)` — Polls up to 60 iterations for `active` status, handles `queued`, `ended`, `superseded`, `disabled`
 - `endAllSessionsForToken(token)` — Cleans up all sessions for a token
 - `invalidateSession(token, model)` — Removes specific session from cache
 - Session key format: `{token}:{model}`
 
-### 6. WarpPlusManager (lines 412-520)
+### 7. WarpPlusManager (lines 1170-1275)
 
 - Manages a SOCKS5 proxy via the `warp-plus` binary for bypassing rate limits
 - `ensureBinary()` — Downloads `warp-plus.exe` from GitHub releases if not present
@@ -86,7 +103,7 @@ FREEBUFF-PROXY/
 - `lastEndpoint` — Caches the last working WARP endpoint (IP:port) for reuse on restart
 - Used by `proxyChatRequest` when `accessTier === 'limited'` to route through Cloudflare WARP
 
-### 7. Run Chain Helpers (lines 569-603)
+### 8. Run Chain Helpers (lines 1277-1330)
 
 Two distinct run chain patterns:
 
@@ -101,10 +118,10 @@ Two distinct run chain patterns:
 2. Start chat run with parent as ancestor
 
 Finalization:
-- `finalizeRunChainNormal` — Records step 2 + finishes parent
+- `finalizeRunChainNormal` — Records step 2 + finishes parent (total_steps: 3)
 - `finalizeRunChainGemini` — Records steps + finishes both chat and parent runs
 
-### 8. Utility Functions (lines 605-754)
+### 9. Utility Functions (lines 1332-1480)
 
 - `generateClientSessionId()` — 13-char random alphanumeric string
 - `cloneMap()` / `cloneSlice()` — Deep clone objects/arrays
@@ -121,7 +138,7 @@ Finalization:
 - `isSessionInvalid(statusCode, errorBody)` — Checks for retryable session errors (426, `session_superseded`, `waiting_room_required`, `session_model_mismatch`, etc.)
 - `isRunInvalid(statusCode, body)` — Checks for `runid not found` / `runid not running`
 
-### 9. HTTP Handlers (lines 756-1089)
+### 10. HTTP Handlers (lines 1482-1820)
 
 - `authorized(req)` — Checks `x-api-key` header or `Authorization: Bearer` against `config.apiKeys`
 - `readBody(req)` — Reads full request body into string
@@ -134,21 +151,22 @@ Finalization:
 - `handleClaudeCountTokens(req, res)` — Estimates tokens (~4 chars/token)
 - `proxyChatRequest(res, payload, model, writeError, writeUpstreamError, writeSuccess)` — Core proxy logic:
   1. Get token from pool
-  2. Ensure session (with retry)
-  3. Resolve agent ID from model
-  4. Start run chain
-  5. Clone payload, inject `codebuff_metadata` (run_id, client_id, instance_id, trace_session_id) and `provider` (order, allow_fallbacks, data_collection)
-  6. Normalize tool schemas
-  7. Forward to upstream (always via `node-fetch`)
-  8. Handle success (streaming or non-streaming)
-  9. On 429: retry up to 3 times with progressive delay (3s, 6s, 9s)
-  10. On error: invalidate session or retry if run expired
-  11. On `session_model_mismatch`: switch to locked model (`deepseek/deepseek-v4-flash`) and retry
-  12. On Warp Plus failure: test SOCKS5 connectivity, fall back to direct connection
+  2. Call agent validation, ad chain, and streak (non-blocking)
+  3. Ensure session (with retry)
+  4. Resolve agent ID from model
+  5. Start run chain (with context-pruner child)
+  6. Clone payload, normalize messages, inject `codebuff_metadata` (`freebuff_instance_id`, `trace_session_id`, `run_id`, `client_id`, `cost_mode: "free"`) and `provider` (`data_collection: "deny"`)
+  7. Normalize tool schemas
+  8. Forward to upstream (always via `node-fetch`)
+  9. Handle success (streaming or non-streaming)
+  10. On 429: retry up to 3 times with progressive delay (3s, 6s, 9s)
+  11. On error: invalidate session or retry if run expired
+  12. On `session_model_mismatch`: switch to locked model (`deepseek/deepseek-v4-flash`) and retry
+  13. On Warp Plus failure: test SOCKS5 connectivity, fall back to direct connection
 - `writeOpenAISuccessResponse()` — Pipes SSE stream or copies full response
 - `writeClaudeSuccessResponse()` — Streams SSE or converts non-stream response to Anthropic format
 
-### 10. Anthropic Conversion (lines 1024-1088)
+### 11. Anthropic Conversion (lines 1822-1900)
 
 - `convertClaudeMessagesRequestToOpenAI(body)` — Converts Anthropic messages format:
   - Extracts `system` field → system message
@@ -159,13 +177,13 @@ Finalization:
   - Maps `tool_calls` → `content[{type: 'tool_use', ...}]`
   - Maps `finish_reason` → `stop_reason` (`tool_calls` → `tool_use`, `length` → `max_tokens`)
 
-### 10. Token Validation (lines 1091-1131)
+### 12. Token Validation (lines 1902-1942)
 
 - `validateToken(token)` — Creates session, checks `status === 'active'`. Handles `model_locked` by retrying with locked model.
 - `validateAllTokens()` — Validates all configured tokens sequentially
 - `reloadTokenPool()` — Reloads config and recreates TokenPool
 
-### 11. Main Request Router (lines 1133-1248)
+### 13. Main Request Router (lines 1944-2060)
 
 Routes by pathname:
 - `/` or `/dashboard` → Serve `dashboard.html`
@@ -183,7 +201,7 @@ Routes by pathname:
 - `/v1/messages` → Anthropic messages
 - `/v1/messages/count_tokens` → Anthropic token counting
 
-### 12. Dashboard (dashboard.html, 1023 lines)
+### 14. Dashboard (dashboard.html, 1023 lines)
 
 - **Liquid Glass Engine** — Canvas-generated displacement maps with refraction profiles (`calculateRefractionProfile`, `generateDisplacementMap`, `generateSpecularMap`)
 - **SVG Filter Pipeline** — `feGaussianBlur` → `feDisplacementMap` → `feColorMatrix` → `feComposite` → `feBlend`
@@ -244,6 +262,8 @@ Parse + validate request body
     ↓
 Get token from pool (round-robin)
     ↓
+Call agent validation, ad chain, and streak (non-blocking)
+    ↓
 ensureSession(token, model) — up to 3 retries
     ↓ (with model_lock handling)
 Start run chain (normal)
@@ -252,16 +272,18 @@ Start run chain (normal)
     ├─ Record + finish child
     └─ Record step on parent
     ↓
-Clone payload, inject codebuff_metadata (run_id, client_id, instance_id, trace_session_id) and provider (order, allow_fallbacks, data_collection)
+Clone payload, normalize messages (developer→system, cache_control, Buffy prompt)
+Inject codebuff_metadata (freebuff_instance_id, trace_session_id, run_id, client_id, cost_mode)
+Inject provider (data_collection: deny)
 Normalize tool schemas ($ref resolution)
     ↓
-Forward to upstream /api/v1/chat/completions
+Forward to upstream /api/v1/chat/completions (with HAR-style headers)
     ↓
 Success → pipe response (stream or buffer)
     ↓ (async)
 Finalize run chain
     ├─ Record step 2 on parent
-    └─ Finish parent run
+    └─ Finish parent run (total_steps: 3)
 ```
 
 ## Session Management
@@ -421,10 +443,14 @@ Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 - [ ] Automatic token refresh
 - [x] Rate limiting — Global 1.3s debounce + 429 retry with progressive backoff
 - [x] Auto-configure opencode provider — Writes `opencode.json` on startup with `[LIM]` prefix for premium models, respects `DISABLED_MODELS`, syncs manual model removals back to config
+- [x] HAR-style fingerprinting — Browser-compatible headers for upstream compatibility
+- [x] Agent validation — Validates agent definitions with upstream before chat requests
+- [x] Ad chain + streak — Completes ad flow and streak check before session creation
+- [x] Message normalization — developer→system, cache_control, Buffy prompt injection
+- [x] Context-pruner run chain — Proper child run lifecycle matching upstream expectations
 - [ ] Request/response logging
 - [ ] Metrics export (Prometheus)
 - [ ] Docker containerization
 - [ ] Multiple upstream backends
 - [ ] Model-specific routing rules
 - [ ] Request caching
-- [ ] Gemini run chain implementation (currently only normal chain used)

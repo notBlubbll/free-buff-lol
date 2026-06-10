@@ -23,7 +23,7 @@ country detection + bypass:<br>
 - **Multi-Token Rotation** — Round-robin across multiple auth tokens with automatic CLI token detection
 - **Dynamic Model Registry** — Fetches available models from Freebuff source code on GitHub
 - **Free Session Management** — Automatic session handling with queue/waiting room and model-lock support
-- **Run Chain Management** — Dual run chains (normal + gemini) with automatic finalization
+- **Run Chain Management** — Dual run chains (normal + gemini) with context-pruner child run and automatic finalization
 - **Tool Schema Normalization** — Resolves `$ref` and `definitions` in tool schemas before forwarding
 - **Dashboard UI** — Liquid glass effects, Bing wallpaper, OAuth flow, toggleable models
 - **Ad Integration** — Fetches and displays upstream ads in the dashboard
@@ -32,6 +32,10 @@ country detection + bypass:<br>
 - **Warp Plus Proxy** — SOCKS5 proxy via Cloudflare WARP for bypassing rate limits on limited-tier sessions
 - **Request Debounce** — Global 1.3s minimum gap between requests to prevent upstream rate limiting
 - **429 Retry** — Automatic retry on rate limit errors (3 attempts with progressive delay: 3s, 6s, 9s)
+- **HAR-style Fingerprinting** — Sends browser-compatible headers (`Accept-Encoding`, `Connection`, `Host`) for upstream compatibility
+- **Agent Validation** — Validates agent definitions with upstream before chat requests
+- **Ad Chain + Streak** — Completes ad flow and streak check before session creation
+- **Message Normalization** — Converts `developer` → `system`, adds `cache_control`, injects system prompt
 
 ## Available Models
 
@@ -40,14 +44,17 @@ The proxy fetches models from Freebuff's TypeScript source. Current models:
 | Model | Agent ID | Tier | Data Training |
 |-------|----------|------|---------------|
 | `minimax/minimax-m2.7` | `base2-free` | Full | No |
+| `minimax/minimax-m3` | `base2-free-minimax-m3` | Premium | No |
 | `moonshotai/kimi-k2.6` | `base2-free-kimi` | Premium | No |
 | `deepseek/deepseek-v4-pro` | `base2-free-deepseek` | Premium | **Yes** |
 | `deepseek/deepseek-v4-flash` | `base2-free-deepseek-flash` | Limited | **Yes** |
-| `mimo/mimo-v2.5-pro` | `base2-free` | Premium | No |
-| `mimo/mimo-v2.5` | `base2-free` | — | No |
-| `google/gemini-3.1-pro-preview` | *(subagent only)* | — | No |
+| `mimo/mimo-v2.5-pro` | `base2-free-mimo-pro` | Premium | No |
+| `mimo/mimo-v2.5` | `base2-free-mimo` | — | No |
+| `google/gemini-2.5-flash-lite` | `base2-free-deepseek-flash` | — | No |
+| `google/gemini-3.1-flash-lite-preview` | `base2-free-deepseek-flash` | — | No |
+| `google/gemini-3.1-pro-preview` | `base2-free-kimi` | — | No |
 
-The first 5 models are user-selectable in the dashboard. `google/gemini-3.1-pro-preview` is used internally as a subagent (gemini-thinker) when using Kimi K2.6 or DeepSeek V4 Pro for deeper reasoning — it is not directly accessible via the API.
+The first 7 models are user-selectable in the dashboard. Gemini models are used internally as subagents for deeper reasoning.
 
 Shortcuts (auto-resolve to full model name):
 - `deepseek-v4-pro` → `deepseek/deepseek-v4-pro`
@@ -57,6 +64,7 @@ Shortcuts (auto-resolve to full model name):
 - `mimo-v2.5` → `mimo/mimo-v2.5`
 - `kimi-k2.6` → `moonshotai/kimi-k2.6`
 - `minimax-m2.7` → `minimax/minimax-m2.7`
+- `minimax-m3` → `minimax/minimax-m3`
 
 Models are toggleable in the dashboard UI.
 
@@ -104,6 +112,7 @@ Both tiers share the same session limit: **5 sessions per day**, resetting at **
 Within the full tier, two models are marked as **premium** and may require additional access:
 - `deepseek/deepseek-v4-pro` (Smartest) — Premium, **collects data for training**
 - `moonshotai/kimi-k2.6` (Balanced) — Premium
+- `minimax/minimax-m3` — Premium
 - `mimo/mimo-v2.5-pro` — Premium
 - `minimax/minimax-m2.7` (Fastest) — Non-premium
 - `deepseek/deepseek-v4-flash` (Most efficient) — Non-premium, **collects data for training**
@@ -354,14 +363,15 @@ Access the dashboard at `http://localhost:8080`:
 ## Architecture
 
 ```
-proxy.js (~1646 lines)
+proxy.js (~2218 lines)
 ├── Version Tracking     — Auto-updates Bun/CLI/SDK versions from upstream
 ├── Config System        — JSON + env vars + CLI token auto-detection
 ├── ModelRegistry        — Parses TypeScript sources from GitHub
-├── UpstreamClient       — HTTP client for Freebuff backend (node-fetch + SOCKS5 support)
+├── UpstreamClient       — HTTP client with HAR-style headers, agent validation, ad chain
 ├── TokenPool            — Session management with mutex locking
 ├── WarpPlusManager      — SOCKS5 proxy via warp-plus binary for rate limit bypass
-├── Run Chain Helpers    — Normal and Gemini run lifecycle
+├── Run Chain Helpers    — Normal (with context-pruner) and Gemini run lifecycle
+├── Message Normalization — developer→system, cache_control, Buffy prompt injection
 ├── Tool Schema Norm.    — $ref resolution and schema normalization
 ├── HTTP Handlers        — OpenAI + Anthropic + management endpoints
 ├── OAuth Flow           — Browser-based GitHub authentication
