@@ -2,8 +2,7 @@
 
 OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free access to multiple LLM models through a unified API. Translated from the Go implementation [Frebuff2API](https://github.com/Quorinex/Freebuff2API) to Node.js/Bun.
 
-![Uploading image.png…]()
-
+<img width="1183" height="622" alt="image" src="https://github.com/user-attachments/assets/42a8d514-7cc1-44d8-9c7f-779024e5a5e9" />
 
 <img width="653" height="442" alt="image" src="https://github.com/user-attachments/assets/be4a5a3e-64f9-49c1-8ae1-0a0a52ad85cd" />
 
