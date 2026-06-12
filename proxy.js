@@ -317,32 +317,51 @@ function saveConfig(cfg) {
   }, null, 2));
 }
 
-function setupOpencodeConfig() {
-  const configPaths = [
-    path.join(os.homedir(), '.config', 'opencode', 'opencode.json')
+function discoverOpencodeConfigs() {
+  const fallbackPaths = [
+    path.join(os.homedir(), '.config', 'opencode', 'opencode.json'),
+    path.join(os.homedir(), '.opencode', 'opencode.json'),
   ];
-  if (process.platform === 'win32') {
-    configPaths.unshift(path.join(os.homedir(), '.opencode', 'opencode.json'));
-    const systemProfile = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'config', 'systemprofile', '.opencode', 'opencode.json');
-    try { if (fs.existsSync(path.dirname(systemProfile))) configPaths.push(systemProfile); } catch {}
+  if (process.platform !== 'win32') return [...new Set(fallbackPaths.filter(p => fs.existsSync(path.dirname(p))))];
+  try {
+    const { execSync } = require('child_process');
+    const result = execSync(
+      `powershell -NoProfile -Command "$paths = @(); Get-ChildItem -Path 'C:\\Users' -Recurse -Filter 'opencode.json' -Depth 10 -ErrorAction SilentlyContinue -Force | ForEach-Object { $paths += $_.FullName }; if (Test-Path '${process.env.SystemRoot || 'C:\\Windows'}\\System32\\config\\systemprofile\\.opencode\\opencode.json') { $paths += '${process.env.SystemRoot || 'C:\\Windows'}\\System32\\config\\systemprofile\\.opencode\\opencode.json' }; $paths | Sort-Object -Unique"`,
+      { timeout: 15000, encoding: 'utf8', maxBuffer: 1024 * 1024 }
+    );
+    const found = result.trim().split('\r\n').filter(Boolean).map(s => s.trim());
+    if (found.length > 0) {
+      console.log(`[Opencode] PowerShell discovered ${found.length} config(s): ${found.join(', ')}`);
+      return found;
+    }
+  } catch (e) {
+    console.log(`[Opencode] PowerShell discovery failed (${e.message}), using fallback paths`);
   }
+  return [...new Set(fallbackPaths.filter(p => fs.existsSync(path.dirname(p))))];
+}
+
+function setupOpencodeConfig() {
+  const configPaths = discoverOpencodeConfigs();
+  let firstRun = false;
 
   for (const configFile of configPaths) {
     try {
       const dir = path.dirname(configFile);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const backupFile = path.join(dir, 'openconfig.b4freebuff.json');
       let existing = { $schema: 'https://opencode.ai/config.json' };
       if (fs.existsSync(configFile)) {
         existing = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-        const backupFile = path.join(dir, 'openconfig.b4freebuff.json');
         if (!fs.existsSync(backupFile)) {
           fs.copyFileSync(configFile, backupFile);
           console.log(`[Opencode] Backup created: ${backupFile}`);
+          firstRun = true;
         } else {
           console.log(`[Opencode] Backup already exists: ${backupFile}`);
         }
       } else {
         console.log(`[Opencode] No existing config found, will create: ${configFile}`);
+        firstRun = true;
       }
       if (!existing.provider || typeof existing.provider !== 'object') existing.provider = {};
       const existingModels = existing.provider['freebuff'] && existing.provider['freebuff'].models
@@ -381,6 +400,7 @@ function setupOpencodeConfig() {
       console.error(`[Opencode] Failed to update ${configFile}: ${e.message}`);
     }
   }
+  return firstRun;
 }
 
 // --- Model Registry ---
@@ -2031,7 +2051,7 @@ async function handleRequest(req, res) {
   if (pathname === '/api/config') {
     if (req.method === 'GET') { writeJSON(res, 200, config); return; }
     if (req.method === 'POST') {
-      try { const body = await readBody(req); const newConfig = JSON.parse(body); config = { ...config, ...newConfig }; saveConfig(config); writeJSON(res, 200, { success: true, config }); }
+      try { const body = await readBody(req); const newConfig = JSON.parse(body); config = { ...config, ...newConfig }; saveConfig(config); setupOpencodeConfig(); writeJSON(res, 200, { success: true, config }); }
       catch (e) { writeJSON(res, 400, { error: e.message }); }
       return;
     }
@@ -2158,7 +2178,7 @@ async function detectCountry() {
 // --- Server Startup ---
 async function startServer() {
   console.log('╔═══════════════════════════════════════════════════════════════╗');
-  console.log('║  Freebuff2Opencode Proxy - Starting...                            ║');
+  console.log('║  Freebuff2Opencode Proxy - Starting...                        ║');
   console.log('╚═══════════════════════════════════════════════════════════════╝');
 
   try { config = loadConfig(); } catch (e) { console.error('Failed to load config:', e.message); process.exit(1); }
@@ -2177,7 +2197,7 @@ async function startServer() {
   modelRegistry = new ModelRegistry();
   await modelRegistry.start();
 
-  setupOpencodeConfig();
+  const firstRun = setupOpencodeConfig();
 
   const allTokenResults = await validateAllTokens();
   const validTokens = allTokenResults.filter(r => r.valid);
@@ -2206,6 +2226,16 @@ async function startServer() {
     console.log(`  Warp Plus: ${config.warpPlus ? 'enabled (auto-start on limit)' : 'disabled'}`);
     if (config.outboundProxy) console.log(`  Outbound Proxy: ${config.outboundProxy.replace(/\/\/[^@]*@/, '//***@')}`);
     console.log('');
+    if (firstRun) {
+      const dashboardUrl = `http://localhost:${port}`;
+      if (process.platform === 'win32') {
+        require('child_process').exec(`start "" "${dashboardUrl}"`);
+      } else if (process.platform === 'darwin') {
+        require('child_process').exec(`open "${dashboardUrl}"`);
+      } else {
+        require('child_process').exec(`xdg-open "${dashboardUrl}"`);
+      }
+    }
   });
 
   setInterval(async () => {

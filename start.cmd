@@ -9,26 +9,57 @@ echo ==================================================
 echo.
 
 set "BUN_PATH="
+
+where bun.exe >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    for /f "delims=" %%b in ('where bun.exe') do (
+        if not defined BUN_PATH set "BUN_PATH=%%~dpb"
+    )
+    goto :bunfound
+)
+
 where bun >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     for /f "delims=" %%b in ('where bun') do (
         if not defined BUN_PATH set "BUN_PATH=%%~dpb"
     )
-    goto :bunpathset
+    goto :bunfound
 )
-for %%d in ("%USERPROFILE%\.bun\bin" "%LOCALAPPDATA%\bun\bin" "%APPDATA%\bun\bin" "%PROGRAMFILES%\bun\bin" "%SYSTEMDRIVE%\.bun\bin") do (
+
+for %%d in (
+    "%USERPROFILE%\.bun\bin"
+    "%LOCALAPPDATA%\bun\bin"
+    "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Oven-sh.Bun_Microsoft.Winget.Source_8wekyb3d8bbwe"
+    "%APPDATA%\bun\bin"
+    "%APPDATA%\npm\node_modules\@oven\bun\bin"
+    "%PROGRAMFILES%\bun\bin"
+    "%PROGRAMFILES%\nodejs\node_modules\@oven\bun\bin"
+    "%SYSTEMDRIVE%\.bun\bin"
+    "%SYSTEMDRIVE%\Program Files\Bun\bin"
+    "%SYSTEMDRIVE%\tools\bun"
+) do (
     if exist "%%~d\bun.exe" (
         set "BUN_PATH=%%~d"
-        goto :bunpathset
+        goto :bunfound
     )
 )
+
 for /f "delims=" %%u in ('dir /b /ad "C:\Users" 2^>nul') do (
     if exist "C:\Users\%%u\.bun\bin\bun.exe" (
         set "BUN_PATH=C:\Users\%%u\.bun\bin"
-        goto :bunpathset
+        goto :bunfound
+    )
+    if exist "C:\Users\%%u\scoop\apps\bun\current\bun.exe" (
+        set "BUN_PATH=C:\Users\%%u\scoop\apps\bun\current"
+        goto :bunfound
+    )
+    if exist "C:\Users\%%u\AppData\Local\bun\bin\bun.exe" (
+        set "BUN_PATH=C:\Users\%%u\AppData\Local\bun\bin"
+        goto :bunfound
     )
 )
-:bunpathset
+
+:bunfound
 if defined BUN_PATH (
     echo [INFO] Bun found at: %BUN_PATH%
     set "PATH=%BUN_PATH%;%PATH%"
@@ -41,7 +72,12 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8080.*LISTENING"') do (
 timeout /t 1 /nobreak >nul
 
 echo [2/4] Detecting runtime...
-where bun >nul 2>&1
+if defined BUN_PATH (
+    echo [INFO] Runtime: Bun
+    set "RUNTIME=bun"
+    goto :start
+)
+where bun.exe >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo [INFO] Runtime: Bun
     set "RUNTIME=bun"
