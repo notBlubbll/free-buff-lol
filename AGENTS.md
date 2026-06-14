@@ -32,18 +32,18 @@ FREEBUFF-PROXY/
 
 ### 2. Config System (lines 161-314)
 
-- `loadConfig()` — Loads `.config/config.json` with env var overrides (`LISTEN_ADDR`, `UPSTREAM_BASE_URL`, `REQUEST_TIMEOUT`, `AUTH_TOKENS`, `API_KEYS`, `DISABLED_MODELS`)
+- `loadConfig()` — Loads `.config/config.json` with env var overrides (`LISTEN_ADDR`, `UPSTREAM_BASE_URL`, `REQUEST_TIMEOUT`, `AUTH_TOKENS`, `API_KEYS`, `ENABLED_MODELS`)
 - `loadFreebuffCLITokens()` — Reads `~/.config/manicode/credentials.json`, extracts all `authToken` entries
 - `saveConfig()` — Writes current config back to `.config/config.json`; auto-creates `.config/` dir if missing; creates backup (`config.backup.json`) on first write
 - `parseDuration()` — Parses duration strings like `15m`, `6h`, `30s`
 - `setupOpencodeConfig()` — Writes/updates opencode provider config:
   - Discovers all `opencode.json` files on the system asynchronously at startup (full-drive search on Windows, full filesystem search elsewhere, using `bash`/`find`)
   - Caches discovered paths so opencode config updates don't rescan the disk
-  - Iterates all model registry entries, skips any in `config.disabledModels`
+  - Iterates all model registry entries, includes only those in `config.enabledModels`
   - Adds `[LIM]` prefix to `name` for premium models (same convention as dashboard)
-  - Reads existing opencode.json before overwriting; if models are missing from the existing freebuff provider that are in the registry and not already disabled, they're auto-added to `config.disabledModels` and persisted via `saveConfig()` — this makes manual model removal from opencode.json persist across restarts
+  - Reads existing opencode.json before overwriting; if models are missing from the existing freebuff provider that are in the registry and still enabled, they're removed from `config.enabledModels` and persisted via `saveConfig()` — this makes manual model removal from opencode.json persist across restarts
   - Writes to all discovered `opencode.json` locations
-- `DISABLED_MODELS` — Config array of model IDs to exclude from the opencode provider; toggleable via dashboard
+- `ENABLED_MODELS` — Config array of model IDs to include in the opencode provider; toggleable via dashboard
 - Auto-normalizes `codebuff.com` → `www.codebuff.com`
 
 ### 3. ModelRegistry (lines 178-280)
@@ -445,7 +445,7 @@ Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 - [ ] Token expiration detection
 - [ ] Automatic token refresh
 - [x] Rate limiting — Global 1.3s debounce + 429 retry with progressive backoff
-- [x] Auto-configure opencode provider — Writes `opencode.json` on startup with `[LIM]` prefix for premium models, respects `DISABLED_MODELS`, syncs manual model removals back to config
+- [x] Auto-configure opencode provider — Writes `opencode.json` on startup with `[LIM]` prefix for premium models, respects `ENABLED_MODELS`, syncs manual model removals back to config
 - [x] HAR-style fingerprinting — Browser-compatible headers for upstream compatibility
 - [x] Agent validation — Validates agent definitions with upstream before chat requests
 - [x] Ad chain + streak — Completes ad flow and streak check before session creation

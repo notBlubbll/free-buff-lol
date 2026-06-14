@@ -228,7 +228,7 @@ Edit `.config/config.json` or set environment variables:
 | `REQUEST_TIMEOUT` | Upstream request timeout | `15m` |
 | `API_KEYS` | Client API keys for proxy auth | `[]` (open access) |
 | `OUTBOUND_PROXY` | SOCKS5/HTTP proxy for outbound requests | `null` |
-| `DISABLED_MODELS` | Models to exclude from opencode provider config | `[]` |
+| `ENABLED_MODELS` | Models to include in the opencode provider config | all registry models |
 
 Environment variables override JSON config values.
 
@@ -304,16 +304,16 @@ const response = await fetch('http://localhost:8080/v1/messages', {
 The proxy **automatically configures** the opencode provider on startup. It writes to `~/.config/opencode/opencode.json` (and `~/.opencode/opencode.json` on Windows).
 
 The auto-config:
-- Includes only **non-disabled models** (respects `DISABLED_MODELS` in config)
+- Includes only **enabled models** (respects `ENABLED_MODELS` in config)
 - Prefixes premium model display names with `[LIM]` (matching the dashboard convention)
 - Creates a backup (`openconfig.b4freebuff.json`) on first run
-- **Detects manual model removals** from opencode.json and syncs them into `DISABLED_MODELS` in `.config/config.json`
+- **Detects manual model removals** from opencode.json and syncs them into `ENABLED_MODELS` in `.config/config.json`
 
-To disable models, use the dashboard toggle or set `DISABLED_MODELS` in `.config/config.json`:
+To choose which models appear, use the dashboard toggles or set `ENABLED_MODELS` in `.config/config.json`:
 
 ```json
 {
-  "DISABLED_MODELS": ["deepseek/deepseek-v4-pro"]
+  "ENABLED_MODELS": ["deepseek/deepseek-v4-pro", "minimax/minimax-m3"]
 }
 ```
 
@@ -391,7 +391,7 @@ dashboard.html (1023 lines)
 2. `loadFreebuffCLITokens()` — Auto-detect CLI tokens from `~/.config/manicode/credentials.json`
 3. `checkAndUpdateVersions()` — Fetch latest versions from upstream sources
 4. `ModelRegistry.start()` — Fetch and parse model definitions from GitHub
-5. `setupOpencodeConfig()` — Write opencode provider config (respects `DISABLED_MODELS`, adds `[LIM]` for premium models, detects manual model removals and syncs to config)
+5. `setupOpencodeConfig()` — Write opencode provider config (respects `ENABLED_MODELS`, adds `[LIM]` for premium models, detects manual model removals and syncs to config)
 6. `validateAllTokens()` — Verify each token via `createSession()`
 7. `TokenPool` — Initialize with valid tokens
 8. `http.createServer()` — Start HTTP server

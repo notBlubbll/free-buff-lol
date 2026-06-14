@@ -701,7 +701,7 @@
     let config = {};
     let models = [];
     let modelMetadata = {};
-    let disabledModels = [];
+    let enabledModels = [];
     let blurTokensEnabled = false;
     let oauthSession = null;
     let oauthPollTimer = null;
@@ -897,7 +897,7 @@
         if (configData) {
           const cfg = configData.config || configData;
           config = cfg;
-          disabledModels = Array.isArray(cfg.disabledModels) ? cfg.disabledModels : [];
+          enabledModels = Array.isArray(cfg.enabledModels) ? cfg.enabledModels : [];
           if (document.getElementById('listenAddr')) document.getElementById('listenAddr').value = cfg.listenAddr || ':8080';
           if (document.getElementById('upstreamUrl')) document.getElementById('upstreamUrl').value = cfg.upstreamBaseURL || 'https://www.codebuff.com';
           if (document.getElementById('rotationInterval')) document.getElementById('rotationInterval').value = cfg.rotationInterval || '6h';
@@ -950,11 +950,11 @@
 
     function renderModels() {
       const container = document.getElementById('modelsContainer');
-      document.getElementById('modelCountBadge').textContent = models.length;
+      document.getElementById('modelCountBadge').textContent = `${enabledModels.length}/${models.length}`;
       if (models.length === 0) { container.innerHTML = '<p class="text-muted">No models available</p>'; return; }
       container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:3px">${models.map((model, idx) => {
-        const isDisabled = disabledModels.includes(model);
-        return `<div class="model-tag${isDisabled ? '' : ' enabled'}" onclick="toggleModel(${idx})" id="model-${idx}"><input type="checkbox" class="form-check-input"${isDisabled ? '' : ' checked'}><div><div class="model-tag-name">${escapeHtml(getModelDisplayName(model))}</div><div class="model-tag-id" title="${escapeHtml(model)}">${escapeHtml(model)}</div></div></div>`;
+        const isEnabled = enabledModels.includes(model);
+        return `<div class="model-tag${isEnabled ? ' enabled' : ''}" onclick="toggleModel(${idx})" id="model-${idx}"><input type="checkbox" class="form-check-input"${isEnabled ? ' checked' : ''}><div><div class="model-tag-name">${escapeHtml(getModelDisplayName(model))}</div><div class="model-tag-id" title="${escapeHtml(model)}">${escapeHtml(model)}</div></div></div>`;
       }).join('')}</div>`;
     }
 
@@ -966,13 +966,14 @@
       if (isCurrentlyEnabled) {
         tag.classList.remove('enabled');
         checkbox.checked = false;
-        if (!disabledModels.includes(model)) disabledModels.push(model);
+        enabledModels = enabledModels.filter(m => m !== model);
       } else {
         tag.classList.add('enabled');
         checkbox.checked = true;
-        disabledModels = disabledModels.filter(m => m !== model);
+        if (!enabledModels.includes(model)) enabledModels.push(model);
       }
-      fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabledModels }) });
+      fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabledModels }) });
+      document.getElementById('modelCountBadge').textContent = `${enabledModels.length}/${models.length}`;
       showToast(`${getModelDisplayName(model)} ${isCurrentlyEnabled ? 'disabled' : 'enabled'}`, 'info');
     }
 

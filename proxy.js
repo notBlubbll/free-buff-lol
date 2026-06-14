@@ -199,6 +199,7 @@ function loadConfig() {
   if (process.env.REQUEST_TIMEOUT) rawConfig.REQUEST_TIMEOUT = process.env.REQUEST_TIMEOUT;
   if (process.env.AUTH_TOKENS) rawConfig.AUTH_TOKENS = process.env.AUTH_TOKENS.split(',').map(t => t.trim()).filter(Boolean);
   if (process.env.API_KEYS) rawConfig.API_KEYS = process.env.API_KEYS.split(',').map(t => t.trim()).filter(Boolean);
+  if (process.env.ENABLED_MODELS) rawConfig.ENABLED_MODELS = process.env.ENABLED_MODELS.split(',').map(t => t.trim()).filter(Boolean);
   if (process.env.WARP_PLUS !== undefined) rawConfig.WARP_PLUS = process.env.WARP_PLUS === 'true';
   if (process.env.OUTBOUND_PROXY) rawConfig.OUTBOUND_PROXY = process.env.OUTBOUND_PROXY;
   if (!rawConfig.AUTH_TOKENS || rawConfig.AUTH_TOKENS.length === 0) {
@@ -219,7 +220,8 @@ function loadConfig() {
     apiKeys: [...new Set(rawConfig.API_KEYS || [])],
     warpPlus: rawConfig.WARP_PLUS !== false,
     outboundProxy: rawConfig.OUTBOUND_PROXY || null,
-    disabledModels: Array.isArray(rawConfig.DISABLED_MODELS) ? rawConfig.DISABLED_MODELS : []
+    enabledModels: Array.isArray(rawConfig.ENABLED_MODELS) ? rawConfig.ENABLED_MODELS : null,
+    legacyDisabledModels: Array.isArray(rawConfig.DISABLED_MODELS) ? rawConfig.DISABLED_MODELS : null
   };
 }
 
@@ -313,7 +315,7 @@ function saveConfig(cfg) {
     AUTH_TOKENS: cfg.authTokens,
     REQUEST_TIMEOUT: `${cfg.requestTimeout / (60 * 1000)}m`,
     API_KEYS: cfg.apiKeys,
-    DISABLED_MODELS: cfg.disabledModels || []
+    ENABLED_MODELS: cfg.enabledModels || []
   }, null, 2));
 }
 
@@ -391,30 +393,44 @@ async function setupOpencodeConfig() {
         firstRun = true;
       }
       if (!existing.provider || typeof existing.provider !== 'object') existing.provider = {};
+      const allRegistryModels = modelRegistry.getModels();
+
+      if (!Array.isArray(config.enabledModels)) {
+        if (Array.isArray(config.legacyDisabledModels)) {
+          const disabledSet = new Set(config.legacyDisabledModels);
+          config.enabledModels = allRegistryModels.filter(m => !disabledSet.has(m));
+          console.log(`[Opencode] Migrated DISABLED_MODELS -> ENABLED_MODELS (${config.enabledModels.length}/${allRegistryModels.length} models)`);
+        } else {
+          config.enabledModels = [...allRegistryModels];
+          console.log(`[Opencode] Initialized ENABLED_MODELS with all ${allRegistryModels.length} models`);
+        }
+        delete config.legacyDisabledModels;
+        saveConfig(config);
+      }
+
       const existingModels = existing.provider['freebuff'] && existing.provider['freebuff'].models
         ? Object.keys(existing.provider['freebuff'].models)
         : null;
       if (existingModels) {
-        const currentDisabled = new Set(config.disabledModels || []);
-        const newlyRemoved = modelRegistry.getModels().filter(m =>
-          !currentDisabled.has(m) && !existingModels.includes(m)
+        const enabledSet = new Set(config.enabledModels);
+        const removedFromProvider = allRegistryModels.filter(m =>
+          enabledSet.has(m) && !existingModels.includes(m)
         );
-        if (newlyRemoved.length > 0) {
-          config.disabledModels = [...new Set([...config.disabledModels, ...newlyRemoved])];
+        if (removedFromProvider.length > 0) {
+          config.enabledModels = config.enabledModels.filter(m => !removedFromProvider.includes(m));
           saveConfig(config);
-          for (const rm of newlyRemoved) console.log(`[Opencode] Detected manual removal of ${rm}, added to disabledModels`);
+          for (const rm of removedFromProvider) console.log(`[Opencode] Detected manual removal of ${rm}, removed from ENABLED_MODELS`);
         }
       }
-      const disabledSet = new Set(config.disabledModels || []);
-      const allRegistryModels = modelRegistry.getModels();
+      const enabledSet = new Set(config.enabledModels || []);
       const models = {};
       for (const m of allRegistryModels) {
-        if (disabledSet.has(m)) { console.log(`[Opencode] Skipping disabled model: ${m}`); continue; }
+        if (!enabledSet.has(m)) { console.log(`[Opencode] Skipping non-enabled model: ${m}`); continue; }
         const meta = modelRegistry.getModelMetadata(m);
         const name = meta && meta.premium ? `[LIM] ${modelRegistry.getDisplayName(m)}` : modelRegistry.getDisplayName(m);
         models[m] = { name };
       }
-      console.log(`[Opencode] disabledModels=[${config.disabledModels.join(', ')}] registry=${allRegistryModels.length} models, writing ${Object.keys(models).length} models to provider`);
+      console.log(`[Opencode] enabledModels=[${config.enabledModels.join(', ')}] registry=${allRegistryModels.length} models, writing ${Object.keys(models).length} models to provider`);
       existing.provider['freebuff'] = {
         npm: '@ai-sdk/openai-compatible',
         name: 'Freebuff Proxy',
@@ -2272,7 +2288,7 @@ async function startServer() {
 
   const server = http.createServer(handleRequest);
   server.listen(port, '0.0.0.0', () => {
-    console.log(`\nFreebuff2Opencode Proxy on http://0.0.0.0:${port}`);
+    console.log(`\nFreebuff2Opencode Proxy on http://127.0.0.1:${port}`);
     console.log(`  Upstream: ${config.upstreamBaseURL}`);
     console.log(`  Models: ${modelRegistry.getModels().length}`);
     console.log(`  API keys: ${config.apiKeys.length > 0 ? config.apiKeys.length + ' (auth enabled)' : 'none (open access)'}`);

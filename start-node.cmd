@@ -25,11 +25,16 @@ if %ERRORLEVEL% neq 0 goto :no_runtime
 
 echo [INFO] Runtime: Node.js
 
-echo [3/3] Starting proxy...
+echo [3/4] Installing dependencies...
+npm install --production
+if exist "bun.lock" del /F /Q "bun.lock" >nul 2>&1
+if exist "package-lock.json" del /F /Q "package-lock.json" >nul 2>&1
+
+echo [4/4] Starting proxy...
 echo.
 echo ==================================================
-echo  Proxy: http://localhost:8080
-echo  Dashboard: http://localhost:8080/dashboard
+echo  Proxy: http://127.0.0.1:8080
+echo  Dashboard: http://127.0.0.1:8080/dashboard
 echo ==================================================
 echo.
 
