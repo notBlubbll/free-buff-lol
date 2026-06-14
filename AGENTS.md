@@ -37,10 +37,12 @@ FREEBUFF-PROXY/
 - `saveConfig()` — Writes current config back to `.config/config.json`; auto-creates `.config/` dir if missing; creates backup (`config.backup.json`) on first write
 - `parseDuration()` — Parses duration strings like `15m`, `6h`, `30s`
 - `setupOpencodeConfig()` — Writes/updates opencode provider config:
+  - Discovers all `opencode.json` files on the system asynchronously at startup (full-drive search on Windows, full filesystem search elsewhere, using `bash`/`find`)
+  - Caches discovered paths so opencode config updates don't rescan the disk
   - Iterates all model registry entries, skips any in `config.disabledModels`
   - Adds `[LIM]` prefix to `name` for premium models (same convention as dashboard)
   - Reads existing opencode.json before overwriting; if models are missing from the existing freebuff provider that are in the registry and not already disabled, they're auto-added to `config.disabledModels` and persisted via `saveConfig()` — this makes manual model removal from opencode.json persist across restarts
-  - Writes to `~/.config/opencode/opencode.json` (and `~/.opencode/opencode.json` on Windows)
+  - Writes to all discovered `opencode.json` locations
 - `DISABLED_MODELS` — Config array of model IDs to exclude from the opencode provider; toggleable via dashboard
 - Auto-normalizes `codebuff.com` → `www.codebuff.com`
 
@@ -55,7 +57,7 @@ FREEBUFF-PROXY/
 
 ### 4. Message Normalization (lines 605-660)
 
-- `normalizeChatMessages(messages)` — Converts `developer` → `system`, adds `cache_control: {"type": "ephemeral"}`, injects "You are Buffy..." system prompt when missing
+- `normalizeChatMessages(messages)` — Converts `developer` → `system`, injects "You are Buffy..." system prompt when missing
 - `normalizeAdMessages(messages)` — Simplifies messages for ad requests
 - `buildAgentValidationPayload()` — Builds agent definitions for upstream validation
 
@@ -84,7 +86,7 @@ FREEBUFF-PROXY/
 
 - Manages multiple auth tokens with round-robin selection
 - Mutex-based locking via promise chain (`withLock()`)
-- `ensureSession(token, model)` — Up to 3 retries, handles model_locked and freebuff_update_required
+- `ensureSession(token, model)` — Up to 3 retries, handles model_locked and freebuff_update_required. On `model_locked`, attempts to end the existing session and create a fresh one for the requested model before falling back to the locked model
 - Session data stored: `status`, `instanceID`, `expiresAt`, `countryCode`, `remainingMs`, `accessTier`
 - `pollUntilReady(token, model, state)` — Polls up to 60 iterations for `active` status, handles `queued`, `ended`, `superseded`, `disabled`
 - `endAllSessionsForToken(token)` — Cleans up all sessions for a token
@@ -161,7 +163,8 @@ Finalization:
   9. Handle success (streaming or non-streaming)
   10. On 429: retry up to 3 times with progressive delay (3s, 6s, 9s)
   11. On error: invalidate session or retry if run expired
-  12. On `session_model_mismatch`: switch to locked model (`deepseek/deepseek-v4-flash`) and retry
+  12. On `session_model_mismatch`: switch to locked model and retry
+  13. On `model_locked`: attempt to unlock the session and retry the requested model, fall back to locked model if upstream rejects
   13. On Warp Plus failure: test SOCKS5 connectivity, fall back to direct connection
 - `writeOpenAISuccessResponse()` — Pipes SSE stream or copies full response
 - `writeClaudeSuccessResponse()` — Streams SSE or converts non-stream response to Anthropic format
@@ -272,7 +275,7 @@ Start run chain (normal)
     ├─ Record + finish child
     └─ Record step on parent
     ↓
-Clone payload, normalize messages (developer→system, cache_control, Buffy prompt)
+Clone payload, normalize messages (developer→system, Buffy prompt)
 Inject codebuff_metadata (freebuff_instance_id, trace_session_id, run_id, client_id, cost_mode)
 Inject provider (data_collection: deny)
 Normalize tool schemas ($ref resolution)
@@ -300,7 +303,7 @@ pollUntilReady() — up to 60 iterations
     ├─ 'queued' → wait (estimatedWaitMs or 250ms), poll getSession()
     ├─ 'ended'/'superseded' → createSession() again
     ├─ 'disabled' → return (no session needed)
-    └─ 'model_locked' → switch to locked model, retry
+    └─ 'model_locked' → end existing session and retry requested model, then fall back to locked model
     ↓
 Cache session keyed by {token}:{model}
 ```
@@ -311,7 +314,7 @@ Cache session keyed by {token}:{model}
 2. `loadFreebuffCLITokens()` — Merge CLI tokens into config
 3. `checkAndUpdateVersions()` — Fetch latest version strings
 4. `new ModelRegistry()` + `.start()` — Fetch models from GitHub
-5. `setupOpencodeConfig()` — Write opencode provider config (filters disabled models, adds `[LIM]` prefix for premium, detects manual removals)
+5. `setupOpencodeConfig()` — Write opencode provider config to all discovered `opencode.json` locations (full-drive search, filters disabled models, adds `[LIM]` prefix for premium, detects manual removals)
 6. `validateAllTokens()` — Test each token
 7. `new TokenPool(validTokens, config, client)` — Initialize pool
 8. `http.createServer(handleRequest).listen(port)` — Start server
@@ -336,7 +339,7 @@ taskkill /PID <pid> /F
 
 ### Token Validation False Positives
 
-`validateToken()` only accepts `status === 'active'`. Handles `model_locked` by retrying with the locked model. Does not accept `disabled` or `queued`.
+`validateToken()` only accepts `status === 'active'`. Does not accept `disabled` or `queued`.
 
 ### Browser Not Opening
 
@@ -446,11 +449,12 @@ Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 - [x] HAR-style fingerprinting — Browser-compatible headers for upstream compatibility
 - [x] Agent validation — Validates agent definitions with upstream before chat requests
 - [x] Ad chain + streak — Completes ad flow and streak check before session creation
-- [x] Message normalization — developer→system, cache_control, Buffy prompt injection
+- [x] Message normalization — developer→system, Buffy prompt injection
 - [x] Context-pruner run chain — Proper child run lifecycle matching upstream expectations
 - [ ] Request/response logging
 - [ ] Metrics export (Prometheus)
 - [ ] Docker containerization
+- [x] Model unlock on request mismatch — Ends locked session and retries requested model, falls back to locked model if rejected
 - [ ] Multiple upstream backends
 - [ ] Model-specific routing rules
 - [ ] Request caching

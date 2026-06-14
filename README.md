@@ -33,7 +33,7 @@ country detection + bypass:<br>
 - **HAR-style Fingerprinting** — Sends browser-compatible headers (`Accept-Encoding`, `Connection`, `Host`) for upstream compatibility
 - **Agent Validation** — Validates agent definitions with upstream before chat requests
 - **Ad Chain + Streak** — Completes ad flow and streak check before session creation
-- **Message Normalization** — Converts `developer` → `system`, adds `cache_control`, injects system prompt
+- **Message Normalization** — Converts `developer` → `system`, injects system prompt
 
 ## Available Models
 
@@ -118,7 +118,9 @@ Within the full tier, two models are marked as **premium** and may require addit
 
 New freebuff users typically start in **limited tier**, which only allows `deepseek/deepseek-v4-flash` — the model that collects data for training. To access all models, you need full tier access.
 
-When the upstream returns a `session_model_mismatch` error (e.g., requesting `minimax/minimax-m2.7` on a limited-tier session), the proxy automatically switches to `deepseek/deepseek-v4-flash` and retries. This is transparent to the client.
+When the upstream returns a `session_model_mismatch` error (e.g., requesting `minimax/minimax-m2.7` on a limited-tier session), the proxy automatically switches to `deepseek/deepseek-v4-flash` and retries.
+
+When the upstream returns a `model_locked` error (the current free session is bound to a different model), the proxy attempts to end the existing session and create a fresh session for the requested model. Only if that fails does it fall back to the locked model.
 
 For limited-tier sessions, the proxy also attempts to route requests through a **Warp Plus** SOCKS5 proxy (Cloudflare WARP) to bypass rate limits. If Warp Plus fails to start or connect, the proxy falls back to direct connection.
 
@@ -135,7 +137,7 @@ Sessions can be in various states:
 - `superseded` — Replaced by a newer session (proxy auto-recreates)
 - `disabled` — No session needed
 
-The proxy handles all these states automatically — queued sessions are polled until active, and ended/superseded sessions are recreated transparently.
+The proxy handles all these states automatically — queued sessions are polled until active, ended/superseded sessions are recreated transparently, and model-locked sessions are ended and re-requested for the desired model when possible.
 
 ### Supported Countries
 
@@ -369,7 +371,7 @@ proxy.js (~2218 lines)
 ├── TokenPool            — Session management with mutex locking
 ├── WarpPlusManager      — SOCKS5 proxy via warp-plus binary for rate limit bypass
 ├── Run Chain Helpers    — Normal (with context-pruner) and Gemini run lifecycle
-├── Message Normalization — developer→system, cache_control, Buffy prompt injection
+├── Message Normalization — developer→system, Buffy prompt injection
 ├── Tool Schema Norm.    — $ref resolution and schema normalization
 ├── HTTP Handlers        — OpenAI + Anthropic + management endpoints
 ├── OAuth Flow           — Browser-based GitHub authentication
@@ -446,6 +448,11 @@ If you see `session_model_mismatch` errors:
 - Your session is in **limited tier** — only `deepseek/deepseek-v4-flash` is available
 - The proxy automatically switches to this model and retries
 - No user action needed — this is handled transparently
+
+If you see `model_locked` errors:
+- Your token currently has an active free session bound to another model
+- The proxy attempts to end that session and create a new one for the requested model
+- If the upstream rejects the unlock attempt, the proxy falls back to the locked model
 
 ## Dependencies
 
