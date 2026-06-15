@@ -1,7 +1,7 @@
 {
-  "name": "freebuff-proxy",
+  "name": "umans-proxy",
   "version": "1.0.0",
-  "description": "OpenAI-compatible Freebuff proxy with dynamic agent tracking, token rotation, and Anthropic support",
+  "description": "OpenAI-compatible proxy server for UMANS AI",
   "main": "proxy.js",
   "scripts": {
     "start": "node proxy.js",
@@ -9,21 +9,14 @@
     "start:bun": "bun run proxy.js"
   },
   "keywords": [
-    "freebuff",
+    "umans-proxy",
+    "umans",
     "proxy",
     "openai",
-    "anthropic",
+    "llm",
     "api"
   ],
   "author": "",
   "license": "MIT",
-  "dependencies": {
-    "freebuff": "^0.0.96",
-    "https-proxy-agent": "^9.1.0",
-    "node-fetch": "^2.7.0",
-    "node-forge": "^1.4.0",
-    "socks": "^2.8.9",
-    "socks-proxy-agent": "^10.0.0",
-    "undici": "^8.3.0"
-  }
+  "dependencies": {}
 }

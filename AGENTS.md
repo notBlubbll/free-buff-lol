@@ -1,462 +1,348 @@
-# FREEBUFF-PROXY Development Guide
+# UMANS-Proxy — Developer Guide
 
 ## Project Structure
 
 ```
-FREEBUFF-PROXY/
-├── proxy.js              # Main proxy implementation (~2218 lines)
-├── dashboard.html        # Liquid glass dashboard with OAuth UI (~1209 lines)
+UMANS-PROXY/
+├── proxy.js              # Main proxy implementation + request router (~1610 lines)
+├── dashboard.html        # Dashboard with usage cards, model search, key management, test chat
 ├── .config/
-│   └── config.json       # Runtime configuration (auto-created)
-├── package.json          # Project metadata (freebuff, node-forge, node-fetch, socks-proxy-agent)
+│   ├── config.json       # Runtime configuration (API key, EMAIL/PASSWORD, enabled models, etc.)
+│   └── usage.json        # (reserved)
+├── .cache/               # Cached assets (auto-created)
+│   ├── wallpaper.jpg     # Cached Bing wallpaper
+│   ├── wallpaper-haven.jpg  # Cached Wallhaven wallpaper
+│   └── wallpaper-freegen.jpg     # Current FreeGen AI wallpaper (pending swap file: wallpaper-freegen.pending.jpg)
+├── package.json          # Project metadata (MIT, no deps)
 ├── start.cmd             # Auto-detect launcher (Bun preferred, Node fallback)
 ├── start-node.cmd        # Node.js-only launcher
+├── skills.md             # Opencode provider configuration reference
 ├── README.md             # User documentation
-└── AGENTS.md             # This file (developer guide)
+└── AGENTS.md             # This file
 ```
 
 ## Key Components
 
-### 1. Constants & Version Tracking (lines 1-99)
+### 1. Constants & Config (proxy.js:1-200)
 
-- Source URLs for GitHub TypeScript files and Rust reference
-- Version constants: `BUN_VERSION`, `FREEBUFF_CLI_VERSION`, `AI_SDK_COMPAT_VERSION`, `PROXY_VERSION`
-- `CANONICAL_MODEL_ALIASES` — Maps shorthand model names to full IDs (e.g. `deepseek-v4-pro` → `deepseek/deepseek-v4-pro`)
-- `FALLBACK_AGENT_IDS` — Hardcoded model-to-agent mapping when registry unavailable (includes `minimax-m3`, `gemini-*`)
-- `CONTEXT_PRUNER_AGENT_ID` — Agent ID for the context-pruner child run
-- `CODEBUFF_ACCEPT_ENCODING`, `CODEBUFF_JSON_USER_AGENT`, `FREEBUFF_CLI_USER_AGENT` — HAR-style header constants
-- `LAST_REQUEST` / `debounceRequest()` — Global request debounce (1.3s minimum gap between requests)
-- `checkAndUpdateVersions()` — Fetches `freebuff2api_rs` source and npm registry to auto-update version strings
-- `checkProxyVersion()` — Checks npm for latest proxy version; shows VBScript MsgBox alert and exits if outdated
-- User-Agent generators: `getApiUserAgent()`, `getChatUserAgent()`, `getAdsUserAgent()`
+- `UMANS_API_BASE` — `https://api.code.umans.ai/v1`
+- `API_KEY_ENV_VAR` — `UMANS_API_KEY`
+- `APP_BASE` — `https://app.umans.ai`
+- `IS_BUN` — Detected at runtime (`typeof Bun !== 'undefined'`)
+- `RUNTIME_VERSION` — Bun or Node version string
+- `loadConfig()` — Loads `.config/config.json` with env var overrides (`LISTEN_ADDR`, `UPSTREAM_BASE_URL`, `REQUEST_TIMEOUT`, `UMANS_API_KEY`, `API_KEYS`, `CACHE_TTL`, `CACHE_MAX_SIZE`, `CACHE_ENABLED`, `OVERRIDE_CONCURRENCY`, `FREEGEN_PROMPT`, `MAX_IMAGES`)
+- `saveConfig()` / `debouncedSaveConfig()` — Writes config (debounced 500ms)
+- `parseDuration()` — Parses strings like `15m`, `6h`, `30s` to ms
+- `maskToken(key)` — Masks an API key for display as `prefix...suffix`
+- `parseListenPort(addr)` — Parses `LISTEN_ADDR` into a port number
 
-### 2. Config System (lines 161-314)
+### 2. Global State (proxy.js:16-32)
 
-- `loadConfig()` — Loads `.config/config.json` with env var overrides (`LISTEN_ADDR`, `UPSTREAM_BASE_URL`, `REQUEST_TIMEOUT`, `AUTH_TOKENS`, `API_KEYS`, `ENABLED_MODELS`)
-- `loadFreebuffCLITokens()` — Reads `~/.config/manicode/credentials.json`, extracts all `authToken` entries
-- `saveConfig()` — Writes current config back to `.config/config.json`; auto-creates `.config/` dir if missing; creates backup (`config.backup.json`) on first write
-- `parseDuration()` — Parses duration strings like `15m`, `6h`, `30s`
-- `setupOpencodeConfig()` — Writes/updates opencode provider config:
-  - Discovers all `opencode.json` files on the system asynchronously at startup (full-drive search on Windows, full filesystem search elsewhere, using `bash`/`find`)
-  - Caches discovered paths so opencode config updates don't rescan the disk
-  - Iterates all model registry entries, includes only those in `config.enabledModels`
-  - Adds `[LIM]` prefix to `name` for premium models (same convention as dashboard)
-  - Reads existing opencode.json before overwriting; if `freebuff.provider.models` is non-empty and registry models that are still enabled are missing from it, they're removed from `config.enabledModels` and persisted via `saveConfig()` — this makes manual model removal from opencode.json persist across restarts
-  - Normalizes model IDs through `canonicalModelName()` when comparing enabled models against the registry
-  - Falls back to writing all registry models when the enabled list would otherwise produce an empty provider (e.g. stale IDs), and logs warnings about any enabled models that don't exist in the registry
-  - Writes to all discovered `opencode.json` locations
-- `ENABLED_MODELS` — Config array of model IDs to include in the opencode provider; toggleable via dashboard
-- Auto-normalizes `codebuff.com` → `www.codebuff.com`
+| Variable | Type | Purpose |
+|---|---|---|
+| `config` | Object | Runtime config object |
+| `userInfoCache` | Object | `{ data, time, ttl: 60000 }` |
+| `startTime` | Date | Server start timestamp |
+| `keyPool` | KeyPool/null | Multi-key pool instance |
+| `activeRequests` | Number | In-flight upstream requests |
+| `requestQueue` | Array | FIFO array of pending requests when at concurrency limit |
+| `conversationMap` | Map | Bounded (10k) session → key affinity store |
+| `modelDisplayNameMap` | Object | Maps model IDs → display names (populated from `/v1/models/info`) |
+| `freegenGenerating` | Boolean | FreeGen wallpaper generation in progress |
+| `freegenGenerationPromise` | Promise/null | Shared promise for concurrent FreeGen requests |
+| `MODEL_CATALOG_CACHE_TTL` | 300000 (5min) | Catalog fetch cache TTL |
+| `RATE_LIMIT_MAP` | Object | Per-model rate limit delays |
+| `MAX_BODY_SIZE` | Number | Hard request body cap (5 MB) |
+| `MAX_RETRIES` | Number | Upstream chat-completion retries (10) |
+| `RETRY_DELAY_MS` | Number | Base retry backoff (3000 ms) |
 
-### 3. ModelRegistry (lines 178-280)
+### 3. Retry Logic (proxy.js:79-88, 1822-1916)
 
-- `start()` — Fetches models immediately, then refreshes every 6 hours
-- `refresh()` — Parallel fetch of `free-agents.ts` and `freebuff-models.ts` from GitHub
-- `parseConstants(source)` — Regex extracts `export const X = 'value'` into a Map
-- `parseAllFreeModels(source, variableMap)` — Regex extracts `'agent-id': new Set([MODEL_VAR, ...])` blocks, resolves variables
-- `buildModelMapping()` — Uses hardcoded `SUPPORTED_MODELS` map (4 models → 4 agents)
-- Result: `modelToAgent` Map, `allModels` array
+`retryLoop(fn)` retries the upstream `/v1/chat/completions` request up to `MAX_RETRIES` times with escalating delays (`3s, 6s, 9s…`).
 
-### 4. Message Normalization (lines 605-660)
+- Retries occur on:
+  - **HTTP 500** — regardless of response body / message
+  - **HTTP 503** — regardless of response body / message
+  - Network/fetch failures (treated as 502) that throw before a response is received
+- On each retry the current key is marked unhealthy so the key pool rotates to the next healthy key.
+- Non-retryable HTTP errors (e.g. 400, 401, 404, 429 without a configured rate-limit map) are returned immediately.
 
-- `normalizeChatMessages(messages)` — Converts `developer` → `system`, injects "You are Buffy..." system prompt when missing
-- `normalizeAdMessages(messages)` — Simplifies messages for ad requests
-- `buildAgentValidationPayload()` — Builds agent definitions for upstream validation
 
-### 5. UpstreamClient (lines 662-1020)
+### 4. Response Cache (proxy.js:99-142)
 
-- `_hostHeader()` — Extracts host from upstream URL for `Host` header
-- `apiHeaders(authToken, extra)` — HAR-style headers: `Accept-Encoding: gzip, deflate`, `Connection: keep-alive`, `Host`, `User-Agent: Bun/1.3.11`
-- `chatHeaders(authToken)` — Same HAR-style headers with `User-Agent: ai-sdk/openai-compatible/...`
-- `cliHeaders(authToken, extra)` — Same HAR-style headers with `User-Agent: Freebuff-CLI/0.0.105`
-- `doJSON(authToken, path, body, method, extraHeaders)` — Generic JSON request with AbortController timeout
-- `startRun(authToken, agentID, ancestorRunIds)` — `POST /api/v1/agent-runs` with `action: 'START'`
-- `finishRun(authToken, runID, totalSteps)` — `POST /api/v1/agent-runs` with `action: 'FINISH'`
-- `recordRunStep(authToken, runID, stepNumber, childRunIds, messageId, startTime)` — `POST /api/v1/agent-runs/{id}/steps`
-- `chatCompletions(authToken, body, proxyAgent)` — `POST /api/v1/chat/completions` (streaming-aware, uses `node-fetch` + `SocksProxyAgent` when proxyAgent provided)
-- `createSession(authToken, model, proxyAgent, countryCode)` — `POST /api/v1/freebuff/session`
-- `getSession(authToken, instanceID, proxyAgent)` — `GET /api/v1/freebuff/session` with `x-freebuff-instance-id` header
-- `endSession(authToken, instanceID)` — `DELETE /api/v1/freebuff/session`
-- `validateAgents(authToken)` — `POST /api/agents/validate` with agent definitions
-- `requestAds(authToken, provider, messages, sessionId)` — `POST /api/v1/ads` with device info and HAR browser UA
-- `getStreak(authToken)` — `GET /api/v1/freebuff/streak`
-- `reportZeroclickImpression(authToken, ids)` — `POST https://zeroclick.dev/api/v2/impressions`
-- `reportCodebuffImpression(authToken, impUrl)` — `POST /api/v1/ads/impression`
-- Handles 426 (`freebuff_update_required`) and `model_locked` errors specially
+LRU cache for non-streaming LLM responses using Map insertion order.
+- **Key**: MD5 of `(model + stream_flag + system + messages + tools)`
+- **TTL**: Configurable (default 60s), **Max size**: default 100
+- **Stats**: `hits`, `misses`, `evictions`
+- `cacheKey(payload, model)` — builds MD5 hash
+- `GET/DELETE /api/cache` — stats/clear
 
-### 6. TokenPool (lines 1022-1168)
+### 5. Key Pool (proxy.js:321-396)
 
-- Manages multiple auth tokens with round-robin selection
-- Mutex-based locking via promise chain (`withLock()`)
-- `ensureSession(token, model)` — Up to 3 retries, handles model_locked and freebuff_update_required. On `model_locked`, attempts to end the existing session and create a fresh one for the requested model before falling back to the locked model
-- Session data stored: `status`, `instanceID`, `expiresAt`, `countryCode`, `remainingMs`, `accessTier`
-- `pollUntilReady(token, model, state)` — Polls up to 60 iterations for `active` status, handles `queued`, `ended`, `superseded`, `disabled`
-- `endAllSessionsForToken(token)` — Cleans up all sessions for a token
-- `invalidateSession(token, model)` — Removes specific session from cache
-- Session key format: `{token}:{model}`
+Round-robin multi-key pool with cooldown/unhealthy marking.
+- `acquire()` — Round-robins, returns `{ key, name, index }`, sets `config.apiKey` + `upstream.apiKey`
+- `markUnhealthy(index, status)` — Cooldown varies by status (503→60s, 502→30s, else 10s)
+- `markHealthy(index)` — Resets state
+- `get state()` — Returns array with masked tokens (first 10 + `...` + last 4)
 
-### 7. WarpPlusManager (lines 1170-1275)
+### 6. Upstream Client & Model Catalog (proxy.js:421-541)
 
-- Manages a SOCKS5 proxy via the `warp-plus` binary for bypassing rate limits
-- `ensureBinary()` — Downloads `warp-plus.exe` from GitHub releases if not present
-- `start()` — Spawns the binary on `127.0.0.1:8086`, waits up to 20s for readiness
-- `_waitForReady(timeout)` — Polls SOCKS5 connectivity via `nodeFetch` to `api.ipify.org`, checks process is still alive
-- `stop()` — Kills the process and resets state
-- `isReady()` — Returns true when process is running and proxy agent is created
-- `getAgent()` — Returns `SocksProxyAgent` instance for use with `node-fetch`
-- `lastEndpoint` — Caches the last working WARP endpoint (IP:port) for reuse on restart
-- Used by `proxyChatRequest` when `accessTier === 'limited'` to route through Cloudflare WARP
+- `UpstreamClient` class with `getUserInfo()` (GET `/v1/models/info`, 10s timeout) and `chatCompletions(body)` (POST `/v1/chat/completions`)
+- `UPSTREAM_AGENT` — Keep-alive HTTPS agent (128 sockets, 60s keepalive)
+- `fetchModelCatalog()` — GET `/v1/models/info` with 15s timeout
+- `getCatalogData()` — Cached 5-min catalog fetcher, populates `modelDisplayNameMap`
+- `searchModels(query, filters)` — Local filter of catalog data (substring + family)
 
-### 8. Run Chain Helpers (lines 1277-1330)
+### 7. Tool Schema Normalization (proxy.js:543-652)
 
-Two distinct run chain patterns:
+Normalizes JSON Schema in tools to handle `$ref`, `$defs`, `definitions`, nullable patterns.
+- Key functions: `normalizeToolSchemas`, `normalizeSchemaMap`, `tryResolveRef`, `simplifyNullableCombinator`, `normalizeTypeField`, `normalizeEnumField`
 
-**Normal chain** (`startRunChainNormal`):
-1. Start parent run (e.g. `base2-free`)
-2. Start child run (`context-pruner`) with parent as ancestor
-3. Record step + finish child run
-4. Record step on parent with child run ID
+### 8. Stream/Body Utilities (proxy.js:654-728)
 
-**Gemini chain** (`startRunChainGemini`):
-1. Start parent run
-2. Start chat run with parent as ancestor
+- `isNodeStream(body)` — Duck-type check for Node.js streams
+- `readBodyText(body)` — Handles Node streams, Web ReadableStreams, and async iterables
+- `pipeBodyToResponse(res, body)` — Pipes upstream response to HTTP response with abort handling
 
-Finalization:
-- `finalizeRunChainNormal` — Records step 2 + finishes parent (total_steps: 3)
-- `finalizeRunChainGemini` — Records steps + finishes both chat and parent runs
+### 9. HTTP Handler Helpers (proxy.js:730-759)
 
-### 9. Utility Functions (lines 1332-1480)
+- `authorized(req)` — Checks `x-api-key` or `Authorization: Bearer` against `config.apiKeys`
+- `readBody(req)` — Promisified chunk collector with `MAX_BODY_SIZE` cap
+- `writeJSON(res, status, payload)` / `writeOpenAIError(res, status, message, type, code)`
 
-- `generateClientSessionId()` — 13-char random alphanumeric string
-- `cloneMap()` / `cloneSlice()` — Deep clone objects/arrays
-- `normalizeToolSchemas(tools)` — Entry point for tool schema normalization
-- `extractDefinitions(schema)` — Extracts `definitions` and `$defs` from schema
-- `normalizeSchemaMap(node, defs, maxDepth)` — Recursively resolves `$ref`, strips `nullable`, normalizes types/enums (max depth: 12)
-- `tryResolveRef(node, defs)` — Resolves `$ref` pointers to inline schemas
-- `simplifyNullableCombinator(schema, key)` — Simplifies `anyOf`/`oneOf` with null types
-- `normalizeTypeField()` — Converts array types to single string
-- `normalizeEnumField()` — Deduplicates enum values, removes nulls
-- `isNodeStream(body)` — Checks if body is a Node.js stream (has `.pipe` and `.on`)
-- `readBodyText(body)` — Reads body to string, handles Node streams, web `ReadableStream` (`getReader`), async iterables, and string fallback
-- `pipeBodyToResponse(body, res)` — Pipes body to HTTP response (Node stream or web `ReadableStream`)
-- `isSessionInvalid(statusCode, errorBody)` — Checks for retryable session errors (426, `session_superseded`, `waiting_room_required`, `session_model_mismatch`, etc.)
-- `isRunInvalid(statusCode, body)` — Checks for `runid not found` / `runid not running`
+### 10. Core HTTP Handlers (proxy.js:761-942)
 
-### 10. HTTP Handlers (lines 1482-1820)
+- `handleHealthz` — Returns uptime, token_state, models_count, runtime, cache stats
+- `handleModels` — OpenAI-format model list from `config.enabledModels`
+- `processQueue()` — Dequeues from `requestQueue` while `activeRequests < limit`
+- `handleChatCompletions` — Parses body, queues or executes via `proxyChatRequest`
+- `proxyChatRequest` — Full proxy pipeline: key acquire → session label → reasoning strip → image-attachment limit (`limitImagesInMessages`) → cache check → model resolve → tool normalize → rate limit → **retry-wrapped upstream call** (see Retry Logic) → title-output sanitize (for title prompts) → stream/non-stream response. The full request body of the first request in a new session is logged to the console.
+- `validateApiKey()` — Calls `getUserInfo()`, populates `userInfoCache` + `modelDisplayNameMap`, returns boolean
 
-- `authorized(req)` — Checks `x-api-key` header or `Authorization: Bearer` against `config.apiKeys`
-- `readBody(req)` — Reads full request body into string
-- `writeJSON(res, statusCode, payload)` — JSON response helper
-- `writeOpenAIError()` / `writeClaudeError()` — Error response formatters
-- `handleHealthz(req, res)` — Returns uptime, token states (with `country_code` and `remaining_ms`), model count, runtime info, and Warp Plus status (with `exit_country` when active)
-- `handleModels(req, res)` — OpenAI-format model list
-- `handleChatCompletions(req, res)` — Parses body, calls `proxyChatRequest`
-- `handleClaudeMessages(req, res)` — Converts Anthropic format, calls `proxyChatRequest`
-- `handleClaudeCountTokens(req, res)` — Estimates tokens (~4 chars/token)
-- `proxyChatRequest(res, payload, model, writeError, writeUpstreamError, writeSuccess)` — Core proxy logic:
-  1. Get token from pool
-  2. Call agent validation, ad chain, and streak (non-blocking)
-  3. Ensure session (with retry)
-  4. Resolve agent ID from model
-  5. Start run chain (with context-pruner child)
-  6. Clone payload, normalize messages, inject `codebuff_metadata` (`freebuff_instance_id`, `trace_session_id`, `run_id`, `client_id`, `cost_mode: "free"`) and `provider` (`data_collection: "deny"`)
-  7. Normalize tool schemas
-  8. Forward to upstream (always via `node-fetch`)
-  9. Handle success (streaming or non-streaming)
-  10. On 429: retry up to 3 times with progressive delay (3s, 6s, 9s)
-  11. On error: invalidate session or retry if run expired
-  12. On `session_model_mismatch`: switch to locked model and retry
-  13. On `model_locked`: attempt to unlock the session and retry the requested model, fall back to locked model if upstream rejects
-  13. On Warp Plus failure: test SOCKS5 connectivity, fall back to direct connection
-- `writeOpenAISuccessResponse()` — Pipes SSE stream or copies full response
-- `writeClaudeSuccessResponse()` — Streams SSE or converts non-stream response to Anthropic format
+### 11. Request Router (proxy.js:963-1341)
 
-### 11. Anthropic Conversion (lines 1822-1900)
+| Route | Methods | Description |
+|---|---|---|
+| `/` or `/dashboard` | GET | Serve `dashboard.html` with current wallpaper embedded as base64 in `<head>` to prevent white flash |
+| `/api/config` | GET/POST | Config read/write (masks API key) |
+| `/api/validate` | GET | Validate API key → `{ valid, hasApiKey }` |
+| `/api/models` | GET | Returns `{ models, model_display_names }` |
+| `/api/models/search` | GET | Search UMANS catalog with `q`, `family`, `license`, `modalities`, `capabilities`, `context_length_min/max`, `per_page` |
+| `/api/models/families` | GET | Returns sorted family list from catalog |
+| `/api/models/add` | POST | Add model IDs to enabled list |
+| `/api/models/remove` | POST | Remove model IDs from enabled list |
+| `/api/bg` | GET | Bing wallpaper proxy (peapix.com) |
+| `/api/bg-wallhaven` | GET | Wallhaven wallpaper proxy |
+| `/api/bg-freegen` | GET/POST | FreeGen AI wallpaper generator. `GET` returns the current cached wallpaper; `POST` waits for/waits for generation and returns the new image (`prompt`, `ratio`, `wait=true` JSON body). Background generation writes to `.cache/wallpaper-freegen.pending.jpg` and atomically swaps to `.cache/wallpaper-freegen.jpg` when done. |
+| `/api/keys` | GET/POST | Multi-key CRUD (add/update/delete) |
+| `/api/cache` | GET/DELETE | Cache stats/clear |
+| `/api/umans/usage` | GET | UMANS app usage data |
+| `/api/umans/usage-history` | GET | 90-day usage history |
+| `/api/umans/concurrency` | GET | Concurrent sessions, limit, active count, queue depth |
+| `/api/umans/login` | POST | Login to UMANS app |
+| `/api/umans/user` | GET | Login status `{ loggedIn, email }` |
+| `/api/umans/logout` | POST | Logout (clears appSession) |
+| `/api/restart` | POST | Triggers `process.exit(42)` after 500ms |
+| `/healthz` | GET | Health check |
+| `/v1/models` | GET | OpenAI-format models |
+| `/v1/chat/completions` | POST | OpenAI chat (concurrency-queued) |
 
-- `convertClaudeMessagesRequestToOpenAI(body)` — Converts Anthropic messages format:
-  - Extracts `system` field → system message
-  - Converts content arrays to text strings
-  - Preserves `max_tokens`, `temperature`, `stream`
-- `convertOpenAINonStreamResponseToClaude(body)` — Converts OpenAI response to Anthropic format:
-  - Maps `choices[0].message.content` → `content[{type: 'text', text}]`
-  - Maps `tool_calls` → `content[{type: 'tool_use', ...}]`
-  - Maps `finish_reason` → `stop_reason` (`tool_calls` → `tool_use`, `length` → `max_tokens`)
+### 12. Opencode Config Discovery & Setup (proxy.js:1343-1412)
 
-### 12. Token Validation (lines 1902-1942)
+- `discoverOpencodeConfigs()` — Native filesystem discovery on Windows: scans `C:\Users` for directories and checks each for `.opencode/opencode.json` and `.config/opencode/opencode.json`, plus the `systemprofile` variant. Falls back to `~/.config/opencode/` and `~/.opencode/`. Non-Windows: returns existing parent dirs of the two fallback paths.
+- `setupOpencodeConfig()` — Writes ALL models from `modelDisplayNameMap` to every discovered `opencode.json`. Falls back to `config.enabledModels` if map is empty. Creates `openconfig.b4umans.json` backup before first edit. Provider key: `umans`, uses `@ai-sdk/openai-compatible`. Each model gets `id`, `name`, `reasoning: true`, `interleaved: true`.
 
-- `validateToken(token)` — Creates session, checks `status === 'active'`. Handles `model_locked` by retrying with locked model.
-- `validateAllTokens()` — Validates all configured tokens sequentially
-- `reloadTokenPool()` — Reloads config and recreates TokenPool
+### 13. Usage Tracking & App Auth (proxy.js:201-319)
 
-### 13. Main Request Router (lines 1944-2060)
+- `fetchUsage()` — GET `https://app.umans.ai/api/usage?context=personal` (app session cookie, 10s timeout, 5min cache)
+- `fetchUsageHistory()` — GET `https://app.umans.ai/api/usage/history?from=...&to=...&granularity=day` (15s timeout, 5min cache)
+- `fetchConcurrency()` — GET `{UPSTREAM_BASE_URL}/usage` with Bearer token, extracts `usage.concurrent_sessions` and `limits.concurrency.limit` (10s timeout, 5min cache)
+- `getEffectiveConcurrency()` — Returns `{ concurrent, limit, overridden }`. If `config.overrideConcurrency > 0`, the effective concurrency limit is capped to `min(override, apiLimit)` (or override when the API limit is unknown).
+- `loginToApp()` — CSRF → POST credentials → extracts `__Secure-authjs.session-token` from set-cookie. Saves to config.
 
-Routes by pathname:
-- `/` or `/dashboard` → Serve `dashboard.html`
-- `/api/config` (GET/POST) → Config read/write
-- `/api/tokens` (GET) → Masked token list
-- `/api/auth/start` (POST) → `POST https://freebuff.llm.pm/api/code`
-- `/api/auth/status` (POST) → `POST https://freebuff.llm.pm/api/status` + auto-save token
-- `/api/models` (GET) → Registry models
-- `/api/bg` (GET) → Bing wallpaper via peapix.com
-- `/api/ads` (GET) → Fetch upstream ads from `/api/v1/ads`
-- `/api/ads/impression` (POST) → Record ad impression
-- `/healthz` → Health check
-- `/v1/models` → OpenAI models
-- `/v1/chat/completions` → OpenAI chat
-- `/v1/messages` → Anthropic messages
-- `/v1/messages/count_tokens` → Anthropic token counting
+### 14. Dashboard (dashboard.html)
 
-### 14. Dashboard (dashboard.html, 1023 lines)
+- **Stat Cards** — Requests, Tokens, Cached % (grouped under a “Window” glass card)
+- **Usage History** — 90-day paginated table (10 per page)
+- **API Key section** — Key pool display with SS mode (blur on hover)
+- **Models section** — Search catalog with family filter, rich toggle tags grouped by family
+- **Quick Actions** — Check Health, Test Connection, Refresh Usage, Restart Proxy
+- **Test Chat** — Streaming/context chat panel with model selector
+- **Environment** — Runtime, Port, Started At, Wallpaper selector (None/Bing/Wallhaven/FreeGen), SS Mode toggle
+- **FreeGen Wallpaper** — Generated via FreeGen AI image API + WebSocket, auto-enabled when FreeGen mode is saved; live generation spinner and prompt input in the Environment card
+- **Key Management Modal** — Add/edit/delete API keys with inline editing; shows account email and User ID (in SS mode the User ID is jumbled and the email is blurred/masked — only `@` remains visible)
+- **Platform Login Modal** — Email/password login to app.umans.ai
+- **Glass UI** — Procedural SVG filter-based glassmorphism (`feDisplacementMap`, `feColorMatrix`)
+- **Auto-refresh** — Status every 15s, usage every 30s
 
-- **Liquid Glass Engine** — Canvas-generated displacement maps with refraction profiles (`calculateRefractionProfile`, `generateDisplacementMap`, `generateSpecularMap`)
-- **SVG Filter Pipeline** — `feGaussianBlur` → `feDisplacementMap` → `feColorMatrix` → `feComposite` → `feBlend`
-- **OAuth UI** — `startOAuth()` → polling every 2s for 60 attempts → auto-saves token
-- **Ad System** — `fetchAds()` → `renderAdInTokenCard()` → impression tracking
-- **Country Card** — Displays `country_code` from session response in a stats card
-- **Session Countdown** — Live `Xm Ys left` timer in Auth Token Status header, using `remaining_ms` from healthz, decremented every second via `setInterval`
-- **SS Mode** — Blur tokens for screenshots
-- **Auto-refresh** — Health check every 5s, ad rotation every 30s, countdown tick every 1s
-- **Collapsible Sections** — Toggle with icon rotation animation
+### 15. Dashboard ↔ UMANS API Data Flow
 
-## Authentication Flow
+The dashboard does not talk to UMANS directly. All UMANS data passes through the proxy endpoints below, which cache responses for 5 minutes and forward the raw UMANS payload.
 
-```
-User starts proxy
-    ↓
-loadConfig() + loadFreebuffCLITokens()
-    ↓
-checkAndUpdateVersions() — fetch Bun/CLI versions
-    ↓
-ModelRegistry.start() — fetch models from GitHub
-    ↓
-validateAllTokens() — test each token via createSession()
-    ↓
-TokenPool initialized with valid tokens
-    ↓
-HTTP server starts on 0.0.0.0:8080
-    ↓
-setInterval: token reload every 5 min
-setInterval: version check every 1 hour
-    ↓
-Ready
+| Dashboard source | Proxy endpoint | Upstream call | Purpose |
+|---|---|---|---|
+| Requests / Tokens / Cached % (Window card) | `GET /api/umans/usage` | `GET https://app.umans.ai/api/usage?context=personal` | Current usage window |
+| 90-Day Usage History | `GET /api/umans/usage-history` | `GET https://app.umans.ai/api/usage/history?from=...&to=...&granularity=day` | Per-day buckets |
+| Concurrency card | `GET /api/umans/concurrency` | `GET {UPSTREAM_BASE_URL}/usage` | Active sessions & limit |
+
+#### `/api/umans/usage` response shape
+
+Proxy forwards an object shaped like:
+
+```json
+{
+  "usage": {
+    "requests_in_window": 246,
+    "tokens_in": 24000000,
+    "tokens_out": 11732073,
+    "tokens_cached": 9360000
+  },
+  "window": { /* optional date/scope metadata from UMANS */ },
+  "loggedIn": true,
+  "email": "..."
+}
 ```
 
-## Model Registry Parsing
+The dashboard derives:
+- `Requests = usage.requests_in_window`
+- `Tokens = usage.tokens_in + usage.tokens_out`
+- `Cached % = (usage.tokens_cached / usage.tokens_in) * 100`
 
-1. Fetch `freebuff-models.ts` from GitHub
-2. Extract constants: `export const FREEBUFF_MINIMAX_MODEL_ID = 'minimax/minimax-m2.7'`
-3. Build variable map: `{ FREEBUFF_MINIMAX_MODEL_ID: 'minimax/minimax-m2.7', ... }`
-4. Fetch `free-agents.ts` from GitHub
-5. Parse agent blocks: `'base2-free': new Set([FREEBUFF_MINIMAX_MODEL_ID, ...])`
-6. Resolve variables using the map
-7. Filter through hardcoded `SUPPORTED_MODELS` (4 models)
-8. Result: `modelToAgent` Map + sorted `allModels` array
+It will prefer fields under `u.window` if that object contains usage fields, falling back to `u.usage`.
 
-## Request Lifecycle
+#### `/api/umans/usage-history` response shape
 
-```
-Client request arrives
-    ↓
-DebounceRequest() — enforce 1.3s minimum gap
-    ↓
-Check API key authorization (if configured)
-    ↓
-Route to handler
-    ↓
-Parse + validate request body
-    ↓
-Get token from pool (round-robin)
-    ↓
-Call agent validation, ad chain, and streak (non-blocking)
-    ↓
-ensureSession(token, model) — up to 3 retries
-    ↓ (with model_lock handling)
-Start run chain (normal)
-    ├─ Start parent run (agent ID)
-    ├─ Start child run (context-pruner)
-    ├─ Record + finish child
-    └─ Record step on parent
-    ↓
-Clone payload, normalize messages (developer→system, Buffy prompt)
-Inject codebuff_metadata (freebuff_instance_id, trace_session_id, run_id, client_id, cost_mode)
-Inject provider (data_collection: deny)
-Normalize tool schemas ($ref resolution)
-    ↓
-Forward to upstream /api/v1/chat/completions (with HAR-style headers)
-    ↓
-Success → pipe response (stream or buffer)
-    ↓ (async)
-Finalize run chain
-    ├─ Record step 2 on parent
-    └─ Finish parent run (total_steps: 3)
+Proxy forwards per-day buckets:
+
+```json
+{
+  "history": {
+    "buckets": [
+      { "bucket": "2026-06-13", "requests": 204, "tokens_in": 6000000, "tokens_out": 3353646, "tokens_cached_read": 5760000 },
+      { "bucket": "2026-06-12", "requests": 439, "tokens_in": 8000000, "tokens_out": 18378427, "tokens_cached_read": 4560000 }
+    ]
+  }
+}
 ```
 
-## Session Management
+The dashboard sums those buckets for the header:
+- `90-Day Requests = Σ requests`
+- `90-Day Tokens = Σ (tokens_in + tokens_out)`
+- `Cached % = Σ tokens_cached_read / Σ tokens_in`
 
-```
-ensureSession(token, model)
-    ↓
-Check cached session (active + not expired)
-    ↓ (cache miss)
-createSession(token, model) → POST /api/v1/freebuff/session
-    ↓
-pollUntilReady() — up to 60 iterations
-    ├─ 'active' → return instanceId
-    ├─ 'queued' → wait (estimatedWaitMs or 250ms), poll getSession()
-    ├─ 'ended'/'superseded' → createSession() again
-    ├─ 'disabled' → return (no session needed)
-    └─ 'model_locked' → end existing session and retry requested model, then fall back to locked model
-    ↓
-Cache session keyed by {token}:{model}
-```
+#### Window Token Estimation Workaround
 
-## Startup Sequence (startServer, lines 1982-2040)
+UMANS sometimes returns mismatched scopes: `requests_in_window` is window-scoped, but `tokens_in`/`tokens_out` equal the 90-day total. In that case the numbers make no sense together, e.g.:
 
-1. `loadConfig()` — Load `.config/config.json` + env vars
-2. `loadFreebuffCLITokens()` — Merge CLI tokens into config
-3. `checkAndUpdateVersions()` — Fetch latest version strings
-4. `new ModelRegistry()` + `.start()` — Fetch models from GitHub
-5. `setupOpencodeConfig()` — Write opencode provider config to all discovered `opencode.json` locations (full-drive search, filters disabled models, adds `[LIM]` prefix for premium, detects manual removals, normalizes model IDs, falls back to all registry models if enabled list is stale)
-6. `validateAllTokens()` — Test each token
-7. `new TokenPool(validTokens, config, client)` — Initialize pool
-8. `http.createServer(handleRequest).listen(port)` — Start server
-9. `setInterval(tokenReload, 5min)` — Check for new CLI tokens
-10. `setInterval(versionCheck, 1hr)` — Update version strings
+| | Requests | Tokens |
+|---|---|---|
+| Window | 246 | 35,732,073 |
+| 90-Day | 643 | 35,732,073 |
 
-## Common Issues
+The dashboard detects this signature (`winReqs > 0 && winReqs < histReqs && winTokens >= histTokens`) and replaces the raw window token value with a proportional estimate derived from the per-day history rows:
 
-### Syntax Errors
+1. Sort buckets newest → oldest.
+2. Walk backward, taking full days until the remaining request budget is smaller than the next day.
+3. Prorate the last day by `remainingReqs / day.requests`.
+4. Aggregate tokens, input tokens, and cached tokens the same way.
+5. Change the card label to **“Tokens (est.)”** with a tooltip explaining the fallback.
 
-Multiple edits can create duplicate code blocks. Validate with:
-```bash
-node --check proxy.js
-```
+The estimate assumes requests are spread roughly evenly through a day. It is only applied when the bug is detected; otherwise the dashboard shows the UMANS-supplied numbers verbatim.
 
-### Port Conflicts
+## Startup Sequence
 
-```bash
-netstat -ano | findstr :8080
-taskkill /PID <pid> /F
-```
+1. `loadConfig()` — Load `.config/config.json` + env var overrides
+2. `ResponseCache` — Init with config values
+3. `KeyPool` — Init from `config.keys` or single default key
+4. `UpstreamClient` — Init HTTP client
+5. `validateApiKey()` — Verify via `/v1/models/info`, populates `modelDisplayNameMap`
+6. `loginToApp()` — Login to app.umans.ai with stored email/password (if configured and no session)
+7. `fetchConcurrency()` — Fetch concurrent sessions & limit from usage API
+8. `http.createServer(handleRequest).listen(port, '127.0.0.1')` — Start HTTP server on port 8084
+9. `setupOpencodeConfig()` — Discover + write ALL models to all opencode.json configs, deferred until after the server is listening
+10. **Auto-open dashboard** — Launches browser to `http://localhost:{port}` once opencode setup finishes (start/open/xdg-open per platform)
 
-### Token Validation False Positives
+## FreeGen AI Wallpaper
 
-`validateToken()` only accepts `status === 'active'`. Does not accept `disabled` or `queued`.
+The proxy integrates [FreeGen.app](https://freegen.app/) as a background source. It replicates the site's flow:
 
-### Browser Not Opening
+1. Call `POST https://prompt-signer.freegen.app/api/test` with the prompt to get `ts` + `sig`.
+2. Call `POST https://image-generator.freegen.app/api/test` with `{ prompt, ts, sig, ratio_id }` to get a `job_id`.
+3. Open a native `WebSocket` to `wss://websocket-bridge.freegen.app/ws` (with `Origin: https://freegen.app`) and subscribe to the `job_id`. The server pushes a `result` message with `image_data`, or an `error`.
+4. Download the image, write it to `.cache/wallpaper-freegen.pending.jpg`, then `fs.renameSync` it to `.cache/wallpaper-freegen.jpg` so the swap is atomic and never exposes a partial image.
 
-On Windows, `start.cmd` handles window title management and port cleanup automatically. The cmd window closes automatically on exit (no "Press any key" pause). The cmd window closes automatically on exit (no "Press any key" pause).
+### Background-generation behavior
 
-### Version Mismatch
+- Dashboard `GET /`/`/dashboard` embeds the current FreeGen wallpaper as base64 in the HTML `<head>` so the page background is visible immediately without a white flash.
+- After serving the page, the proxy kicks off a **background** FreeGen generation for the next dashboard load. That generation writes to the pending file and atomically swaps it on completion.
+- The dashboard's **FreeGen** mode adds a prompt input and **Generate** button. Clicking it calls `POST /api/bg-freegen` with `wait: true` and applies the returned image immediately via `URL.createObjectURL`, also saving the prompt to config.
 
-If upstream returns `freebuff_update_required` (HTTP 426), the proxy invalidates the current session and retries. `checkAndUpdateVersions()` runs on startup and every hour.
+### Endpoints
 
-### Body Stream Handling
+| Endpoint | Method | Body | Response |
+|---|---|---|---|
+| `/api/bg-freegen` | GET | — | Current cached `.cache/wallpaper-freegen.jpg` JPEG, or 404. With `?wait=1`, blocks until a new wallpaper is generated. |
+| `/api/bg-freegen` | POST | `{ prompt, ratio?, wait? }` | `wait: true` returns the generated JPEG and applies `wallpaperSource: 'freegen'`. `wait: false` returns `202 Accepted` and generates in the background. |
 
-The proxy uses two different `fetch` implementations:
-- **Global `fetch`** (Node 18+ built-in) — returns web `ReadableStream` for `resp.body`
-- **`node-fetch`** (v2.7.0) — returns Node.js `Readable` stream for `resp.body`
+### Configuration
 
-The `readBodyText()` function handles both: it checks for Node streams (`.pipe`/`.on`), web streams (`.getReader`), async iterables, and falls back to `String()`. The `pipeBodyToResponse()` function similarly handles both stream types.
-
-When adding new upstream calls, always use `readBodyText()` instead of `resp.body.text()` or `resp.text()` to avoid crashes.
-
-### Running Commands in Background
-
-Always run long-lived commands (proxy, dev servers, watchers) in the background to prevent shell hangup. Use `Start-Process` or run detached:
-
-```powershell
-# Good: Background process that won't block
-Start-Process -FilePath "bun" -ArgumentList "run", "proxy.js" -WindowStyle Hidden
-
-# Bad: Foreground process that blocks the terminal
-bun run proxy.js
-```
-
-If a process must run in the terminal, ensure it's detached or use `&` in Unix shells. On Windows, `start.cmd` handles this automatically.
+- Config key `FREEGEN_PROMPT` / env var `FREEGEN_PROMPT` — default prompt used when `wallpaperSource` is `freegen`.
+- Config key `wallpaperSource` — one of `none`, `bing`, `wallhaven`, or `freegen`.
+- Dashboard exposes `freegenPrompt` and `wallpaperSource` in `/api/config` and persists them on change.
 
 ## Testing
 
 ```bash
-# Syntax check
-node --check proxy.js
-
-# Start proxy
-node proxy.js
-
-# Test endpoints
-curl http://localhost:8080/healthz
-curl http://localhost:8080/v1/models
-curl http://localhost:8080/api/tokens
-curl http://localhost:8080/api/models
-
-# Test chat completion
-curl -X POST http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"minimax/minimax-m2.7","messages":[{"role":"user","content":"Hello"}]}'
-
-# Test Anthropic endpoint
-curl -X POST http://localhost:8080/v1/messages \
-  -H "Content-Type: application/json" \
-  -d '{"model":"deepseek/deepseek-v4-pro","max_tokens":100,"messages":[{"role":"user","content":"Hello"}]}'
+node --check proxy.js          # Syntax check
+node proxy.js                  # Start proxy
+curl http://localhost:8084/healthz
+curl http://localhost:8084/v1/models
+curl http://localhost:8084/api/umans/usage
+curl http://localhost:8084/api/umans/concurrency
+curl "http://localhost:8084/api/models/search?q=llama"
+curl "http://localhost:8084/api/i18n?locale=de&generate=1"
 ```
 
 ## Dependencies
 
-```json
-{
-  "freebuff": "^0.0.96",
-  "node-forge": "^1.4.0",
-  "node-fetch": "^2.7.0",
-  "socks-proxy-agent": "^8.0.0",
-  "https-proxy-agent": "^9.1.0",
-  "socks": "^2.8.9"
-}
-```
+Zero external npm dependencies — uses only Node.js built-in modules: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`, plus native `fetch` (Node 18+) and native `WebSocket` (Node 24+) for the FreeGen integration.
 
-Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
+## Data Storage
 
-## Performance
+- `.config/config.json` — Full proxy config including API keys, enabled models, display names, EMAIL/PASSWORD, APP_SESSION, OVERRIDE_CONCURRENCY, MAX_IMAGES, wallpaperSource, FREEGEN_PROMPT
+- `.cache/wallpaper.jpg` — Cached Bing wallpaper
+- `.cache/wallpaper-haven.jpg` — Cached Wallhaven wallpaper
+- `.cache/wallpaper-freegen.jpg` — Current FreeGen AI wallpaper
+- `.cache/wallpaper-freegen.pending.jpg` — In-progress FreeGen wallpaper; renamed to `.cache/wallpaper-freegen.jpg` only when complete
+- `.cache/usage.db` — SQLite cache of past daily usage-history buckets (excludes the current day). Uses `node:sqlite` on Node 22+ or `bun:sqlite` on Bun.
 
-| Setting | Value |
-|---------|-------|
-| Model registry refresh | 6 hours |
-| Token reload check | 5 minutes |
-| Version check | 1 hour |
-| Request timeout | 15 minutes |
-| Request debounce | 1.3 seconds |
-| 429 retry attempts | 3 |
-| 429 retry delays | 3s, 6s, 9s |
-| Session poll max iterations | 60 |
-| Session poll delay | 250ms-2s |
-| Health check (dashboard) | 5 seconds |
-| Ad rotation | 30 seconds |
+## Concurrency Queue
 
-## Security
+- `activeRequests` — Counter of in-flight upstream requests
+- `requestQueue` — FIFO array of pending requests
+- `processQueue()` — Dequeues when `activeRequests < limit`
+- Each completed request calls `processQueue()` via `.finally()`
 
-- API keys for proxy authentication (optional, via `API_KEYS` config)
-- Token masking in dashboard and API responses (`token.substring(0,8) + '...' + token.substring(len-4)`)
-- No token logging in request logs
-- Config file should be `.gitignore`'d
-- CORS not configured (same-origin only)
-- SS Mode in dashboard blurs token display
+## Notes for Opencode Agents
 
-## Future Improvements
+When working on UMANS-Proxy through opencode, keep the following in mind to avoid common tool failures.
 
-- [ ] WebSocket support for streaming
-- [ ] Token expiration detection
-- [ ] Automatic token refresh
-- [x] Rate limiting — Global 1.3s debounce + 429 retry with progressive backoff
-- [x] Auto-configure opencode provider — Writes `opencode.json` on startup with `[LIM]` prefix for premium models, respects `ENABLED_MODELS`, syncs manual model removals back to config
-- [x] HAR-style fingerprinting — Browser-compatible headers for upstream compatibility
-- [x] Agent validation — Validates agent definitions with upstream before chat requests
-- [x] Ad chain + streak — Completes ad flow and streak check before session creation
-- [x] Message normalization — developer→system, Buffy prompt injection
-- [x] Context-pruner run chain — Proper child run lifecycle matching upstream expectations
-- [ ] Request/response logging
-- [ ] Metrics export (Prometheus)
-- [ ] Docker containerization
-- [x] Model unlock on request mismatch — Ends locked session and retries requested model, falls back to locked model if rejected
-- [ ] Multiple upstream backends
-- [ ] Model-specific routing rules
-- [ ] Request caching
+### Edit tool / exact replacements
+
+Opencode's `edit` tool requires an exact text match for `oldString`. If the error `Could not find oldString in the file. It must match exactly, including whitespace, indentation, and line endings.` appears, follow these steps:
+
+1. **Read the file first** with the `read` tool and copy the exact block you want to replace, including all spaces, tabs, and line endings.
+2. **Paste that verbatim** into the `edit` call's `oldString` parameter.
+3. **Include more surrounding lines** if the same string appears multiple times in the file (or use `replaceAll: true` only when you intend to replace every occurrence).
+4. If matching remains difficult, use the `write` tool to overwrite the entire file instead.
+
+### Web research
+
+- Use `webfetch` to retrieve content from a known URL.
+- Do **not** call `websearch`; it is not available unless the OpenCode provider or `OPENCODE_ENABLE_EXA` is enabled. Prefer `webfetch` for documentation or GitHub source lookups.
+
+### Provider configuration
+
+- The proxy auto-writes a `umans` provider into every discovered `opencode.json`.
+- The generated config explicitly sets `"instructions": ["AGENTS.md", "skills.md"]` so this guide and the provider reference are loaded on startup.
+- After the proxy updates `opencode.json`, restart opencode for the changes to take effect.

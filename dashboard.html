@@ -3,450 +3,218 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Freebuff2OpenCode&thinsp;Dashboard</title>
+  <title data-i18n="app_title">UMANS Proxy Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <style>
-    :root {
-      --primary-color: #0d6efd;
-      --secondary-color: #6c757d;
-      --success-color: #32CD32;
-      --bs-success: #32CD32;
-      --bs-success-rgb: 50, 205, 50;
-      --danger-color: #dc3545;
-    }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      padding: 0;
-      background-color: #0d1117;
-    }
-    .dashboard-container {
-      position: relative;
-      z-index: 10;
-      max-width: 1200px;
-      margin: 0 auto;
-      overflow-x: hidden;
-    }
-    .card {
-      position: relative;
-      border: none;
-      border-radius: var(--glass-radius, 12px);
-      margin-bottom: 20px;
-      background: transparent !important;
-    }
-    .glass-panel {
-      position: absolute;
-      inset: 0;
-      z-index: 0;
-      border-radius: inherit;
-      overflow: hidden;
-    }
-    .glass-panel::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-      border-radius: inherit;
-      background-color: rgba(255, 255, 255, 0.08);
-      pointer-events: none;
-    }
-    .glass-panel::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      z-index: 0;
-      border-radius: inherit;
-      pointer-events: none;
-    }
-    .card-content {
-      position: relative;
-      z-index: 3;
-      border-radius: inherit;
-      overflow: hidden;
-      background: rgba(0, 0, 0, 0.1);
-    }
-    .card-header {
-      background: rgba(0, 0, 0, 0.2) !important;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      font-size: 14px;
-      color: white;
-      padding: 0.4rem 1.25rem;
-      position: relative;
-      z-index: 4;
-    }
-    .card-body {
-      padding: 0.5rem;
-      position: relative;
-      z-index: 4;
-      backdrop-filter: blur(13px) !important;
-      -webkit-backdrop-filter: blur(13px) !important;
-    }
-    .status-indicator {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      display: inline-block;
-      margin-right: 8px;
-    }
-    .status-online { background-color: var(--success-color); box-shadow: 0 0 10px var(--success-color); }
-    .status-offline { background-color: var(--danger-color); box-shadow: 0 0 10px var(--danger-color); }
-    .status-unknown { background-color: var(--secondary-color); }
-    .token-blurred {
-      filter: blur(5px);
-      transition: filter 0.2s ease;
-    }
-    .token-blurred:hover {
-      filter: blur(0) !important;
-    }
-    .btn-white-bg {
-      background: white;
-      border: 1px solid white;
-      color: #0d1117;
-    }
-    .btn-white-bg:hover {
-      background: rgba(255, 255, 255, 0.85);
-      border-color: white;
-      color: #0d1117;
-    }
-    .btn-outline-action {
-      border: 1px solid rgba(255, 255, 255, 0.8);
-      color: white;
-      background: transparent;
-    }
-    .btn-outline-action:hover {
-      background: rgba(255, 255, 255, 0.15);
-      border-color: white;
-      color: white;
-    }
-    .stats-card {
-      background: transparent;
-      border-radius: 12px;
-      padding: 0;
-      text-align: center;
-      position: relative;
-      z-index: 10;
-      backdrop-filter: blur(13px);
-      -webkit-backdrop-filter: blur(13px);
-    }
-    .stats-value {
-      font-size: 28px;
-      font-weight: 700;
-      color: white;
-    }
-    .stats-label {
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.8);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-    .toast-container {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 1050;
-    }
-    .form-label {
-      font-weight: 600;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: rgba(255, 255, 255, 0.9);
-      margin-bottom: 6px;
-    }
-    .form-control, .form-select {
-      display: block;
-      width: 100%;
-      background: rgba(255, 255, 255, 0.15);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: white;
-      padding: 0.375rem 0.75rem;
-      font-size: 1rem;
-      border-radius: 0.375rem;
-    }
-    .form-control:focus, .form-select:focus {
-      background: rgba(255, 255, 255, 0.2);
-      border-color: rgba(255, 255, 255, 0.4);
-      color: white;
-      outline: 0;
-      box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
-    }
-    .form-control::placeholder {
-      color: rgba(255, 255, 255, 0.6);
-    }
-    .text-muted {
-      color: rgba(255, 255, 255, 0.7) !important;
-    }
-    h4, h5, strong, .fw-medium {
-      color: white !important;
-    }
-    small {
-      color: rgba(255, 255, 255, 0.8) !important;
-    }
-    .collapsible-header {
-      cursor: pointer;
-      user-select: none;
-    }
-    .collapsible-header .toggle-icon {
-      transition: transform 0.2s ease;
-    }
-    .collapsible-header .toggle-icon.collapsed {
-      transform: rotate(-90deg);
-    }
-    .collapse-section {
-      transition: all 0.3s ease;
-    }
-    .collapse-section.collapsed {
-      display: none;
-    }
-    .pool-card {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 10px;
-    }
-    .pool-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 8px;
-    }
-    .pool-name {
-      font-weight: 600;
-      color: #58a6ff;
-      font-size: 0.95rem;
-    }
-    .pool-status {
-      padding: 3px 10px;
-      border-radius: 10px;
-      font-size: 0.75rem;
-      font-weight: 600;
-    }
-    .model-tag {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      background: rgba(255, 255, 255, 0.03);
-      opacity: 0.5;
-      user-select: none;
-      transition: all 0.2s ease;
-      margin: 3px;
-    }
-    .model-tag.enabled {
-      border-color: rgba(50, 205, 50, 0.3);
-      background: rgba(50, 205, 50, 0.1);
-      opacity: 1;
-    }
-    .model-tag:hover { opacity: 0.8; }
-    .model-tag.enabled:hover { opacity: 1; }
-    .model-tag-name {
-      font-size: 11px;
-      font-weight: 600;
-      color: white;
-      white-space: nowrap;
-    }
-    .model-tag-id {
-      font-size: 9px;
-      color: rgba(255, 255, 255, 0.5);
-      white-space: nowrap;
-    }
-    .model-tag input[type="checkbox"] {
-      pointer-events: none;
-    }
-    .ad-card {
-      padding: 0 .5rem;
-      position: relative;
-      cursor: default;
-      flex-grow: 1;
-      display: flex;
-      flex-direction: column;
-    }
-    .ad-glass-box {
-      display: flex;
-      align-items: stretch;
-      gap: 0;
-      flex: 1;
-      min-height: 0;
-      width: 100%;
-    }
-    .ad-glass-inner {
-      flex: 1;
-      min-width: 0;
-      min-height: 0;
-      position: relative;
-      overflow: hidden;
-      border-radius: 12px;
-      background: rgba(255,255,255,0.5);
-      border: 1px solid rgba(255,255,255,0.15);
-      padding: 10px 12px;
-      backdrop-filter: blur(13px);
-      -webkit-backdrop-filter: blur(13px);
-    }
-    .ad-arrow {
-      flex-shrink: 0;
-      width: 32px;
-      border-radius: 12px;
-      background: rgba(255,255,255,0.15);
-      border: none;
-      color: rgba(0,0,0,0.35);
-      font-size: 16px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: color 0.15s ease, background 0.15s ease;
-      padding: 0;
-      line-height: 1;
-      backdrop-filter: blur(13px);
-      -webkit-backdrop-filter: blur(13px);
-    }
-    .ad-arrow:hover {
-      color: rgba(0,0,0,0.7);
-    }
-    .ad-arrow-left { margin-right: 4px; }
-    .ad-arrow-right { margin-left: 4px; }
-    #adSlidesContainer {
-      display: grid;
-    }
-    #adSlidesContainer > * {
-      grid-row: 1;
-      grid-column: 1;
-    }
-    .ad-slide {
-      opacity: 0;
-      pointer-events: none;
-      visibility: hidden;
-    }
-    .ad-slide.active {
-      opacity: 1;
-      pointer-events: auto;
-      visibility: visible;
-    }
-    .ad-dot {
-      cursor: pointer;
-      padding: 4px;
-    }
-    .ad-dot .dot-indicator {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: rgba(0,0,0,0.2);
-      transition: background 0.2s ease, transform 0.2s ease;
-    }
-    .ad-dot.active .dot-indicator {
-      background: rgba(0,0,0,0.7);
-      transform: scale(1.3);
-    }
-    .ad-header-bar {
-      position: absolute;
-      top: 2px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-      pointer-events: none;
-    }
-    .ad-header-bar .ad-label {
-      font-size: 9px;
-      color: rgba(255,255,255,0.7);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
+    :root { --primary-color: #0d6efd; --secondary-color: #6c757d; --success-color: #32CD32; --bs-success: #32CD32; --bs-success-rgb: 50,205,50; --danger-color: #dc3545; }
+    body { margin:0; min-height:100vh; padding:0; background-color:#0d1117; }
+    .autotranslate-toggle { position: fixed; left: 12px; bottom: 12px; z-index: 1080; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.18); border-radius: 999px; color: rgba(255,255,255,0.85); font-size: 12px; letter-spacing: 0.2px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); cursor: pointer; user-select: none; transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease; }
+    .autotranslate-toggle:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.3); color: white; }
+    .autotranslate-toggle input { margin: 0; accent-color: #32CD32; cursor: pointer; }
+    .autotranslate-toggle .beta-tag { font-size: 10px; color: rgba(255,255,255,0.55); text-transform: uppercase; letter-spacing: 0.5px; }
+    .forced-hint { margin-left:6px; font-size:10px; color:rgba(255,255,255,0.55); text-transform:uppercase; letter-spacing:0.4px; }
+    .translate-overlay { position: fixed; inset: 0; z-index: 100000; background: rgba(0,0,0,0.25); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 16px; color: white; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+    .translate-overlay.show { display: flex; }
+    .translate-overlay .spinner-ring { width: 64px; height: 64px; border-radius: 50%; border: 4px solid rgba(255,255,255,0.15); border-top-color: #32CD32; animation: translate-spin 0.9s linear infinite; }
+    .translate-overlay .title { font-size: 22px; font-weight: 600; letter-spacing: 0.4px; }
+    .translate-overlay .subtitle { font-size: 13px; color: rgba(255,255,255,0.65); max-width: 320px; text-align: center; line-height: 1.5; }
+    .translate-cancel { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: rgba(255,255,255,0.8); padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+    @keyframes translate-spin { to { transform: rotate(360deg); } }
+    .dashboard-container { position:relative; z-index:10; max-width:1200px; margin:0 auto; overflow-x:hidden; }
+    .card { position:relative; border:none; border-radius:var(--glass-radius,12px); margin-bottom:20px; background:transparent!important; }
+    .glass-panel { position:absolute; inset:0; z-index:0; border-radius:inherit; overflow:hidden; }
+    .glass-panel::before { content:''; position:absolute; inset:0; z-index:1; border-radius:inherit; background-color:rgba(255,255,255,0.04); pointer-events:none; }
+    .card-content { position:relative; z-index:3; border-radius:inherit; overflow:hidden; background:rgba(0,0,0,0.22); width:100%; }
+    .card-header { background:rgba(0,0,0,0.2)!important; border-bottom:1px solid rgba(255,255,255,0.15); font-weight:600; text-transform:uppercase; letter-spacing:0.5px; font-size:14px; color:white; padding:0.4rem 1.25rem; position:relative; z-index:4; }
+    .card-body { padding:0.5rem; position:relative; z-index:4; backdrop-filter:blur(13px)!important; -webkit-backdrop-filter:blur(13px)!important; }
+    .card-body.env-body { padding-top:0.35rem; padding-bottom:0.35rem; padding-left:0.6rem; padding-right:0.6rem; font-size:0.75rem; }
+    .env-body .row { margin-bottom:0; }
+    .env-body .col-6 { padding-right:6px; padding-left:6px; }
+    .env-body small { font-size:0.6rem !important; display:block; margin-bottom:1px; }
+    .env-body .fw-medium { font-size:0.75rem; }
+    .env-body .form-label { font-size:0.6rem; margin-bottom:2px; }
+    .env-body .btn-group .btn { padding:0.15rem 0.35rem; font-size:0.6rem !important; }
+    .env-body .form-control { padding:0.15rem 0.5rem; font-size:0.65rem; }
+    .env-body .input-group button { padding:0.15rem 0.4rem; font-size:0.6rem !important; }
+    .env-body .mb-2 { margin-bottom:0.4rem !important; }
+    .status-indicator { width:12px; height:12px; border-radius:50%; display:inline-block; margin-right:8px; }
+    .status-online { background-color:var(--success-color); box-shadow:0 0 10px var(--success-color); }
+    .status-offline { background-color:var(--danger-color); box-shadow:0 0 10px var(--danger-color); }
+    .status-unknown { background-color:var(--secondary-color); }
+    .status-reconnecting { background-color:#ffd700; box-shadow:0 0 10px #ffd700; animation:pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+    .token-blurred { filter:blur(5px); transition:filter 0.2s ease; }
+    .token-blurred:hover { filter:blur(0)!important; }
+    .btn-white-bg { background:white; border:1px solid white; color:#0d1117; }
+    .btn-white-bg:hover { background:rgba(255,255,255,0.85); border-color:white; color:#0d1117; }
+    .btn-outline-action { border:1px solid rgba(255,255,255,0.8); color:rgba(255,255,255,0.8); background:transparent; font-size:0.75rem!important; padding:0.25rem 0.5rem!important; display:inline-flex!important; align-items:center; justify-content:center; text-decoration:none!important; transition:all 0.15s ease; }
+    #section-actions .btn-outline-action { justify-content:flex-start; text-align:left; }
+    .btn-outline-action:hover { background:rgba(255,255,255,0.15); border-color:rgba(255,255,255,0.9)!important; color:#fff!important; outline:0; }
+    .btn-outline-action.active { background:rgba(50,205,50,0.2)!important; border-color:rgba(50,205,50,0.8)!important; color:#fff!important; box-shadow:0 0 0 0.15rem rgba(50,205,50,0.25)!important; }
+    .stats-card { background:transparent; border-radius:12px; padding:0; text-align:center; align-items:stretch; justify-content:center; backdrop-filter:blur(13px); -webkit-backdrop-filter:blur(13px); }
+    .stats-value { font-size:28px; font-weight:700; color:white; }
+    .stats-label { font-size:12px; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing:1px; }
+    .stat-inline-card { margin-bottom:0 !important; border:1px solid rgba(255,255,255,0.08); }
+    .stat-inline-card .card-content { background:rgba(0,0,0,0.12); padding:16px 8px; text-align:center; }
+    .toast-container { position:fixed; top:20px; right:20px; z-index:1050; }
+    .form-label { font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:0.5px; color:rgba(255,255,255,0.9); margin-bottom:6px; }
+    .form-control, .form-select { display:block; width:100%; background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.2); color:white; padding:0.375rem 0.75rem; font-size:1rem; border-radius:0.375rem; }
+    .form-control:focus, .form-select:focus { background:rgba(255,255,255,0.2); border-color:rgba(255,255,255,0.4); color:white; outline:0; box-shadow:0 0 0 0.2rem rgba(102,126,234,0.25); }
+    .form-control::placeholder { color:rgba(255,255,255,0.6); }
+    .form-select option { background:#1a1d23; color:white; }
+    .text-muted { color:rgba(255,255,255,0.7)!important; }
+    h4, h5, strong, .fw-medium { color:white!important; }
+    small { color:rgba(255,255,255,0.8)!important; }
+    .collapsible-header { cursor:pointer; user-select:none; }
+    .collapsible-header .toggle-icon { transition:transform 0.2s ease; }
+    .collapsible-header .toggle-icon.collapsed { transform:rotate(-90deg); }
+    .collapse-section { transition:all 0.3s ease; }
+    .collapse-section.collapsed { display:none; }
+    .pool-card { background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:12px; margin-bottom:10px; }
+    .pool-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+    .pool-name { font-weight:600; color:#58a6ff; font-size:0.95rem; }
+    .model-tag { display:inline-flex; align-items:center; gap:3px; padding:1px 5px; border-radius:3px; cursor:pointer; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.03); opacity:0.5; user-select:none; transition:all 0.15s ease; margin:1px; line-height:1.4; }
+    .model-tag.enabled { border-color:rgba(50,205,50,0.3); background:rgba(50,205,50,0.1); opacity:1; }
+    .model-tag:hover { opacity:0.8; }
+    .model-tag.enabled:hover { opacity:1; }
+    .model-tag-name { font-size:13px; font-weight:600; color:#fff; white-space:nowrap; }
+    .model-tag-id { font-size:11px; color:rgba(255,255,255,0.55); white-space:nowrap; opacity:0.85; }
+    .model-tag input[type="checkbox"] { pointer-events:none; transform:scale(0.6); margin:0 2px 0 0; }
+    .history-item { border-bottom:1px solid rgba(255,255,255,0.04); font-size:11px; }
+    .history-item:last-child { border-bottom:none; }
+    .history-scroll { max-height:75vh; overflow-y:auto; width:100%; padding:0 2rem; }
+    .history-scroll::-webkit-scrollbar { width:5px; }
+    .history-scroll::-webkit-scrollbar-track { background:rgba(255,255,255,0.03); border-radius:2px; }
+    .history-scroll::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.15); border-radius:2px; }
+    .test-chat-card { display:none; margin-top:-10px; margin-bottom:20px; background:transparent; border:none; border-radius:12px; overflow:visible; }
+    .test-chat-card.visible { display:block; }
+    .test-chat-header { background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.12); border-bottom:1px solid rgba(255,255,255,0.15); border-radius:0; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; font-size:12px; color:white; padding:0.4rem 1rem; display:flex; align-items:center; justify-content:space-between; }
+    .test-chat-model-wrap { width:100%; }
+    .test-chat-model-select { background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.18); color:white; font-size:10px; font-weight:600; letter-spacing:0.3px; padding:0.2rem 1.6rem 0.2rem 0.5rem; border-radius:5px; cursor:pointer; appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 16 16' fill='%23ffffff'><path d='M4 6l4 4 4-4z'/></svg>"); background-repeat:no-repeat; background-position:right 4px center; background-size:10px; }
+    .test-chat-model-select:focus { outline:0; background-color:rgba(255,255,255,0.18); border-color:rgba(255,255,255,0.35); }
+    .test-chat-model-select option { background:#1a1d23; color:white; }
+    .test-chat-body { padding:8px; position:relative; z-index:4; backdrop-filter:blur(13px)!important; -webkit-backdrop-filter:blur(13px)!important; }
+    .test-chat-transcript { height:200px; box-sizing:border-box; padding:0; margin-bottom:8px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.08); border-radius:8px; overflow:hidden; position:relative; }
+    .test-chat-scroll { position:absolute; top:6px; left:8px; right:8px; bottom:6px; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; justify-content:flex-end; scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.2) rgba(255,255,255,0.04); }
+    .test-chat-pairs { display:flex; flex-direction:column; gap:6px; min-height:0; }
+    .test-chat-scroll::-webkit-scrollbar { width:6px; }
+    .test-chat-scroll::-webkit-scrollbar-track { background:rgba(255,255,255,0.04); border-radius:3px; }
+    .test-chat-scroll::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.2); border-radius:3px; }
+    .test-chat-msg { font-size:12px; line-height:1.45; padding:6px 8px; border-radius:6px; word-wrap:break-word; white-space:pre-wrap; }
+    .test-chat-msg-content { max-height:75px; overflow-y:auto; overflow-x:hidden; word-wrap:break-word; white-space:pre-wrap; scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.2) rgba(255,255,255,0.04); }
+    .test-chat-msg-content::-webkit-scrollbar { width:6px; }
+    .test-chat-msg-content::-webkit-scrollbar-track { background:rgba(255,255,255,0.04); border-radius:3px; }
+    .test-chat-msg-content::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.2); border-radius:3px; }
+    .test-chat-msg.user { background:rgba(50,205,50,0.12); border:1px solid rgba(50,205,50,0.25); color:rgba(255,255,255,0.95); align-self:flex-end; max-width:85%; margin-left:auto; }
+    .test-chat-msg.assistant { background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:rgba(255,255,255,0.9); align-self:flex-start; max-width:92%; margin-right:auto; }
+    .test-chat-msg.assistant.error { background:rgba(220,53,69,0.12); border-color:rgba(220,53,69,0.3); color:rgba(255,200,200,0.95); }
+    .test-chat-msg-role { font-size:9px; text-transform:uppercase; letter-spacing:0.5px; color:rgba(255,255,255,0.5); margin-bottom:2px; font-weight:600; display:flex; align-items:center; gap:6px; }
+    .test-chat-msg-time { font-size:9px; font-weight:500; letter-spacing:0.3px; text-transform:none; color:rgba(255,255,255,0.4); font-variant-numeric:tabular-nums; }
+    .test-chat-ms { color:#fff; font-weight:600; }
+    .test-chat-toggle { display:flex; align-items:center; gap:4px; min-height:auto; }
+    .test-chat-toggle .form-check-input:checked + .form-check-label { color:#32CD32!important; }
+    .test-chat-msg.user .test-chat-msg-role { color:rgba(50,205,50,0.7); }
+    .test-chat-empty { font-size:11px; color:rgba(255,255,255,0.4); text-align:center; padding:20px 8px; font-style:italic; }
+    .test-chat-input-row { display:flex; gap:6px; align-items:stretch; }
+    .test-chat-input { flex:1; background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.18); color:white; padding:0.35rem 0.6rem; font-size:12px; border-radius:6px; min-width:0; }
+    .test-chat-input:focus { outline:0; background:rgba(255,255,255,0.18); border-color:rgba(255,255,255,0.35); box-shadow:0 0 0 0.15rem rgba(102,126,234,0.2); }
+    .test-chat-input::placeholder { color:rgba(255,255,255,0.5); }
+    .test-chat-send { background:rgba(50,205,50,0.2); border:1px solid rgba(50,205,50,0.5); color:white; padding:0.35rem 0.7rem; font-size:12px; font-weight:600; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; transition:all 0.15s ease; }
+    .test-chat-send:hover:not(:disabled) { background:rgba(50,205,50,0.35); border-color:rgba(50,205,50,0.7); }
+    .test-chat-send:disabled { opacity:0.4; cursor:not-allowed; }
+    .test-chat-clear { background:transparent; border:1px solid rgba(255,255,255,0.2); color:rgba(255,255,255,0.7); padding:0.35rem 0.55rem; font-size:11px; border-radius:6px; cursor:pointer; transition:all 0.15s ease; }
+    .test-chat-clear:hover { background:rgba(255,255,255,0.08); color:white; }
+    .test-chat-thinking { display:inline-flex; align-items:center; gap:4px; font-size:11px; color:rgba(255,255,255,0.5); font-style:italic; }
+    .test-chat-thinking .dot { width:5px; height:5px; border-radius:50%; background:rgba(255,255,255,0.6); animation:chatDot 1.2s ease-in-out infinite; }
+    .test-chat-thinking .dot:nth-child(2) { animation-delay:0.2s; }
+    .test-chat-thinking .dot:nth-child(3) { animation-delay:0.4s; }
+    @keyframes chatDot { 0%,80%,100% { opacity:0.3; transform:scale(0.8); } 40% { opacity:1; transform:scale(1.1); } }
   </style>
 </head>
 <body>
+  <div class="translate-overlay" id="translateOverlay">
+    <div class="spinner-ring"></div>
+    <div class="title" data-i18n="overlay_translating">Translating</div>
+    <div class="subtitle" id="translateOverlaySubtitle" data-i18n="overlay_translating_sub" data-i18n-template="overlay_translating_sub">Translating UI to {lang}...</div>
+    <button class="translate-cancel" id="translateCancelBtn" type="button"><span data-i18n="btn_cancel">Cancel</span></button>
+  </div>
+
+  <label class="autotranslate-toggle" id="autotranslateToggle">
+    <input type="checkbox" id="autotranslateCheckbox">
+    <span data-i18n="autotranslate_label">autotranslate (beta)</span>
+  </label>
+
   <svg style="position:absolute;overflow:hidden;width:0;height:0" color-interpolation-filters="sRGB">
     <defs id="glass-defs"></defs>
   </svg>
 
-  <div class="container pt-2">
+  <div class="container-fluid pt-2">
   <div class="row justify-content-center">
   <div class="dashboard-container col-11">
     <div class="card sticky-top p-0" style="top:0;z-index:100" data-glass>
       <div class="glass-panel"></div>
       <div class="card-content px-2">
         <div class="d-flex justify-content-between align-items-center">
-          <div>
-            <h4 class="mb-0"><i class="bi bi-lightning-charge-fill me-2"></i>Freebuff2OpenCode Dashboard</h4>
-          </div>
-          <div class="text-end">
-            <div>
-              <span id="statusIndicator" class="status-indicator status-unknown"></span>
-              <span id="statusText" class="fw-medium">Checking...</span>
-            </div>
-          </div>
+          <div><h4 class="mb-0"><i class="bi bi-cloud-lightning me-2"></i><span data-i18n="app_title">UMANS Proxy</span></h4></div>
+          <div><span id="statusIndicator" class="status-indicator status-unknown"></span><span id="statusText" class="fw-medium" data-i18n="status_checking">Checking...</span></div>
         </div>
       </div>
-    </div>
-
-    <div class="row text-center d-flex align-items-stretch mb-3">
-      <div class="col-12 col-md-8">
-        <div class="card h-100 d-flex flex-column" data-glass>
-          <div class="glass-panel"></div>
-          <div class="ad-card card-content flex-grow-1 d-flex flex-column">
-            <div class="ad-header-bar">
-              <span class="ad-label" id="adCounterLabel">Ad</span>
-            </div>
-            <div class="ad-glass-box">
-              <button class="ad-arrow ad-arrow-left" onclick="prevAd()" title="Previous ad"><i class="bi bi-chevron-left"></i></button>
-              <div class="ad-glass-inner">
-                <div id="adSlidesContainer"></div>
-              </div>
-              <button class="ad-arrow ad-arrow-right" onclick="nextAd()" title="Next ad"><i class="bi bi-chevron-right"></i></button>
-            </div>
-            <div id="adDots" style="display:flex;justify-content:center;gap:4px;margin-top:6px"></div>
-          </div>
-        </div>
-      </div>
-      <div class="col-6 col-md-2"><div class="stats-card card h-100 d-flex flex-column" data-glass><div class="card-content flex-grow-1 justify-content-center align-items-center d-flex flex-column" style="padding:10px"><div class="stats-value" id="totalModels">0</div><div class="stats-label">Models</div></div></div></div>
-      <div class="col-6 col-md-2"><div class="stats-card card h-100 d-flex flex-column" data-glass><div class="card-content flex-grow-1 justify-content-center align-items-center d-flex flex-column" style="padding:10px"><div class="stats-value" id="countryCode">-</div><div class="stats-label">Country</div></div></div></div>
     </div>
 
     <div class="row">
       <div class="col-lg-8">
-        <div class="card" data-glass data-section="tokens">
+        <div class="card" data-glass>
           <div class="glass-panel"></div>
           <div class="card-content">
-            <div class="card-header collapsible-header d-flex justify-content-between align-items-center" onclick="toggleSection('tokens')">
-              <span>
-                <i class="bi bi-chevron-down toggle-icon me-1"></i>
-                <i class="bi bi-key-fill me-2"></i>Auth Token Status
-              </span>
-              <span id="tokenRemainingTime" style="font-size:0.85rem;font-weight:600;color:#58a6ff"></span>
-              <span class="badge bg-secondary" id="tokenCountBadge">0</span>
+            <div class="card-header"><span><i class="bi bi-window me-2"></i><span data-i18n="section_window">Window</span></span></div>
+            <div class="card-body">
+              <div class="row g-2">
+                <div class="col-3">
+                  <div class="card stat-inline-card h-100"><div class="card-content"><div class="stats-value" id="totalRequests">--</div><div class="stats-label" data-i18n="label_requests">Requests</div></div></div>
+                </div>
+                <div class="col-6">
+                  <div class="card stat-inline-card h-100"><div class="card-content"><div class="stats-value" id="totalTokens">--</div><div class="stats-label" id="totalTokensLabel" data-i18n="label_tokens">Tokens</div></div></div>
+                </div>
+                <div class="col-3">
+                  <div class="card stat-inline-card h-100"><div class="card-content"><div class="stats-value" id="cachedPct">--</div><div class="stats-label" data-i18n="label_cached_pct">Cached %</div></div></div>
+                </div>
+              </div>
             </div>
-            <div class="card-body collapse-section" id="section-tokens">
-              <div id="tokenPoolsContainer"></div>
-              <small class="text-muted" style="display:block;margin-top:10px;">
-                Tokens are auto-detected from Freebuff CLI (~/.config/manicode/credentials.json)
-              </small>
-            </div>
+          </div>
+        </div>
+        <div class="card" data-glass>
+          <div class="glass-panel"></div>
+          <div class="card-content">
+            <div class="card-header d-flex justify-content-between align-items-center"><span><i class="bi bi-clock-history me-2"></i><span data-i18n="section_usage_history">90-Day Usage History</span></span><span style="font-size:11px;font-weight:600;color:#fff;position:absolute;left:50%;transform:translateX(-50%)"><span id="histTotalReqs">0</span> <span style="font-weight:400;color:rgba(255,255,255,0.6)">REQUESTS</span></span><span style="font-size:11px;font-weight:400;color:rgba(255,255,255,0.6)"><span style="font-weight:600;color:#fff" id="histTotalTokens">0</span> TOKENS <span id="histCachedPct" style="font-weight:400;color:rgba(255,255,255,0.45)"></span></span></div>
+            <div class="card-body p-0"><div class="history-scroll" id="usageHistoryContainer"><div style="text-align:center;padding:20px;color:rgba(255,255,255,0.3);font-size:12px" class="fw-medium">Loading...</div></div><div id="usagePagination" class="d-flex justify-content-center align-items-center py-1" style="border-top:1px solid rgba(255,255,255,0.08)"></div></div>
           </div>
         </div>
       </div>
 
       <div class="col-lg-4">
-        <div id="oauthContainer" style="display:none"></div>
+        <div class="card" data-glass data-section="tokens">
+          <div class="glass-panel"></div>
+          <div class="card-content">
+            <div class="card-header collapsible-header d-flex justify-content-between align-items-center" onclick="toggleSection('tokens')">
+              <span><i class="bi bi-chevron-down toggle-icon collapsed me-1"></i><i class="bi bi-key-fill me-2"></i><span data-i18n="section_api_key">API Key</span></span>
+              <span class="d-flex align-items-stretch gap-2" style="height:100%">
+                <span class="badge bg-secondary d-flex align-items-center" id="tokenCountBadge" onclick="event.stopPropagation()">0</span>
+                <button class="btn btn-sm btn-outline-action rounded-0" onclick="event.stopPropagation();openKeysModal()" style="font-size:11px"><i class="bi bi-pencil me-1"></i><span data-i18n="btn_manage">Manage</span></button>
+              </span>
+            </div>
+            <div class="card-body collapse-section collapsed" id="section-tokens"><div id="tokenPoolsContainer"></div></div>
+          </div>
+        </div>
+
         <div class="card" data-glass data-section="models">
           <div class="glass-panel"></div>
           <div class="card-content">
             <div class="card-header collapsible-header d-flex justify-content-between align-items-center" onclick="toggleSection('models')">
-              <span>
-                <i class="bi bi-chevron-down toggle-icon me-1"></i>
-                <i class="bi bi-cpu-fill me-2"></i>Available Models
-              </span>
+              <span><i class="bi bi-chevron-down toggle-icon me-1"></i><i class="bi bi-cpu-fill me-2"></i><span data-i18n="section_models">Models</span></span>
               <span class="badge bg-secondary" id="modelCountBadge">0</span>
             </div>
-            <div class="card-body collapse-section" id="section-models">
-              <div id="modelsContainer"></div>
-            </div>
+            <div class="card-body collapse-section" id="section-models"><div id="modelsContainer"></div></div>
           </div>
         </div>
 
@@ -454,14 +222,53 @@
           <div class="glass-panel"></div>
           <div class="card-content">
             <div class="card-header collapsible-header" onclick="toggleSection('actions')">
-              <i class="bi bi-chevron-down toggle-icon collapsed me-1"></i>
-              <i class="bi bi-lightning-charge-fill me-2"></i>Quick Actions
+              <i class="bi bi-chevron-down toggle-icon collapsed me-1"></i><i class="bi bi-lightning-charge-fill me-2"></i><span data-i18n="section_quick_actions">Quick Actions</span>
             </div>
             <div class="card-body collapse-section collapsed" id="section-actions">
               <div class="d-grid gap-2">
-                <button class="btn btn-outline-action" onclick="checkHealth()"><i class="bi bi-activity me-2"></i>Check Health</button>
-                <button class="btn btn-outline-action" onclick="testConnection()"><i class="bi bi-wifi me-2"></i>Test Connection</button>
-                <button class="btn btn-outline-action" onclick="refreshModels()"><i class="bi bi-arrow-clockwise me-2"></i>Refresh Models</button>
+                <button class="btn btn-outline-action" onclick="checkHealth()" data-i18n="btn_check_health">Check Health</button>
+                <button class="btn btn-outline-action" onclick="testConnection()" data-i18n="btn_test_connection">Test Connection</button>
+                <button class="btn btn-outline-action" onclick="fetchUsage()" data-i18n="btn_refresh_usage">Refresh Usage</button>
+                <button class="btn btn-outline-action" id="restartBtn" onclick="restartProxy()" data-i18n="btn_restart_proxy">Restart Proxy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TEST CHAT -->
+        <div class="card test-chat-card" id="testChatCard" data-glass>
+          <div class="glass-panel"></div>
+          <div class="card-content">
+            <div class="test-chat-header">
+              <span><i class="bi bi-chat-dots-fill me-2"></i><span data-i18n="section_test_chat">Test Chat</span></span>
+              <div class="d-flex align-items-start gap-2">
+                <div class="d-flex flex-column gap-1">
+                  <div class="form-check form-switch mb-0 test-chat-toggle" title="Send conversation context with each message">
+                    <input class="form-check-input" type="checkbox" id="testChatContextToggle" style="margin-top:0">
+                    <label class="form-check-label" for="testChatContextToggle" style="font-size:10px;cursor:pointer;color:rgba(255,255,255,0.6)" data-i18n="test_chat_ctx">Ctx</label>
+                  </div>
+                  <div class="form-check form-switch mb-0 test-chat-toggle" title="Stream response in real-time">
+                    <input class="form-check-input" type="checkbox" id="testChatStreamToggle" style="margin-top:0" checked>
+                    <label class="form-check-label" for="testChatStreamToggle" style="font-size:10px;cursor:pointer;color:rgba(255,255,255,0.6)" data-i18n="test_chat_stream">Stream</label>
+                  </div>
+                </div>
+                <button class="test-chat-clear" id="testChatClearBtn" onclick="clearTestChat()" data-i18n-title="test_chat_clear_title"><i class="bi bi-trash3"></i></button>
+              </div>
+            </div>
+            <div class="test-chat-body">
+              <div class="test-chat-model-wrap mb-2" style="width:100%;max-width:none">
+                <select class="test-chat-model-select" id="testChatModelSelect" style="width:100%;font-size:11px;padding:0.3rem 1.6rem 0.3rem 0.5rem" onchange="onModelChange()"></select>
+              </div>
+              <div class="test-chat-transcript" id="testChatTranscript">
+                <div class="test-chat-scroll" id="testChatScroll">
+                  <div class="test-chat-pairs" id="testChatPairs">
+                    <div class="test-chat-empty" id="testChatEmpty" data-i18n="test_chat_empty">Select a model and ask anything to test.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="test-chat-input-row">
+                <input type="text" class="test-chat-input" id="testChatInput" placeholder="Type a message..." data-i18n-placeholder="test_chat_placeholder" maxlength="2000" autocomplete="off">
+                <button class="test-chat-send" id="testChatSendBtn" onclick="sendTestChat()"><i class="bi bi-send-fill"></i> <span data-i18n="test_chat_send">Send</span></button>
               </div>
             </div>
           </div>
@@ -471,732 +278,998 @@
           <div class="glass-panel"></div>
           <div class="card-content">
             <div class="card-header collapsible-header" onclick="toggleSection('env')">
-              <i class="bi bi-chevron-down toggle-icon collapsed me-1"></i>
-              <i class="bi bi-info-circle-fill me-2"></i>Environment
+              <i class="bi bi-chevron-down toggle-icon collapsed me-1"></i><i class="bi bi-info-circle-fill me-2"></i><span data-i18n="section_environment">Environment</span>
             </div>
-            <div class="card-body collapse-section collapsed" id="section-env">
+            <div class="card-body env-body collapse-section collapsed" id="section-env">
+              <div class="row"><div class="col-6 mb-2"><small class="text-muted" data-i18n="env_runtime">Runtime</small><div class="fw-medium" id="runtimeInfo">-</div></div><div class="col-6 mb-2"><small class="text-muted" data-i18n="env_port">Port</small><div class="fw-medium" id="portInfo">-</div></div></div>
+              <div class="row"><div class="col-6 mb-2"><small class="text-muted" data-i18n="env_started_at">Started At</small><div class="fw-medium" id="startedAt">-</div></div><div class="col-6 mb-2"><small class="text-muted" data-i18n="env_ss_mode">SS Mode</small><div class="form-check form-switch" id="ssModeSwitch" style="margin:0;min-height:0;padding:0;display:flex;align-items:center"><input class="form-check-input" type="checkbox" id="blurTokensEnv" onchange="toggleBlurTokens(this.checked)" style="margin:0"><label class="form-check-label text-muted" for="blurTokensEnv" id="ssModeLabel" style="cursor:pointer;font-size:0.6rem;margin:0;padding-left:0.35rem">Off</label></div></div></div>
               <div class="mb-2">
-                <small class="text-muted">Runtime</small>
-                <div class="fw-medium" id="runtimeInfo">-</div>
-              </div>
-              <div class="mb-2">
-                <small class="text-muted">Warp Plus</small>
-                <div class="fw-medium" id="operaProxyStatus">-</div>
-              </div>
-              <div class="mb-2">
-                <small class="text-muted">Started At</small>
-                <div class="fw-medium" id="startedAt">-</div>
-              </div>
-
-              <div class="mb-2">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" id="wallpaperToggle" onchange="toggleWallpaper()">
-                  <label class="form-check-label text-muted" for="wallpaperToggle" style="cursor:pointer">Enable Wallpaper</label>
+                <label class="form-label" style="font-size:0.7rem;color:rgba(255,255,255,0.5);margin-bottom:2px" data-i18n="env_wallpaper">Wallpaper</label>
+                <div class="btn-group w-100" role="group" id="wallpaperGroup">
+                  <button class="btn btn-outline-action btn-wp" data-wp="none" onclick="setWallpaper('none')" data-i18n="wp_none">None</button>
+                  <button class="btn btn-outline-action btn-wp" data-wp="bing" onclick="setWallpaper('bing')" data-i18n="wp_bing">Bing</button>
+                  <button class="btn btn-outline-action btn-wp" data-wp="wallhaven" onclick="setWallpaper('wallhaven')" data-i18n="wp_wallhaven">Wallhaven</button>
+                  <button class="btn btn-outline-action btn-wp" data-wp="freegen" onclick="setWallpaper('freegen')" data-i18n="wp_freegen">FreeGen</button>
                 </div>
               </div>
-              <div class="mb-2">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" id="adsToggleEnv" checked onchange="toggleAds(this.checked)">
-                  <label class="form-check-label text-muted" for="adsToggleEnv" style="cursor:pointer">Show Ads</label>
+              <div class="mb-2" id="freegenPromptContainer" style="display:none">
+                <label class="form-label" style="font-size:0.65rem;color:rgba(255,255,255,0.5);margin-bottom:2px" data-i18n="freegen_prompt">FreeGen Prompt</label>
+                <div class="input-group input-group-sm" style="gap:4px;margin-bottom:4px">
+                  <input type="text" class="form-control form-control-sm" id="freegenPromptInput" placeholder="Describe your wallpaper..." data-i18n-placeholder="freegen_placeholder" style="font-size:0.7rem;background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.2);color:white">
+                  <button class="btn btn-outline-action" style="font-size:0.6rem;padding:0.2rem 0.5rem;white-space:nowrap" onclick="useDefaultFreegenPrompt()" title="Load default prompt" data-i18n="freegen_default">Default</button>
+                  <button class="btn btn-success" style="font-size:0.65rem;padding:0.2rem 0.5rem;white-space:nowrap" id="freegenGenerateBtn" onclick="generateFreegenWallpaper()" data-i18n="freegen_generate">Generate</button>
                 </div>
-              </div>
-              <div class="mb-2">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" id="blurTokensEnv" onchange="toggleBlurTokens(this.checked)">
-                  <label class="form-check-label text-muted" for="blurTokensEnv" style="cursor:pointer">SS Mode</label>
-                </div>
+                <div id="freegenStatus" style="font-size:0.65rem;color:rgba(255,255,255,0.55);min-height:1rem"></div>
               </div>
             </div>
           </div>
         </div>
 
-        <div class="card" data-glass data-section="config">
-          <div class="glass-panel"></div>
-          <div class="card-content">
-            <div class="card-header collapsible-header" onclick="toggleSection('config')">
-              <i class="bi bi-chevron-down toggle-icon collapsed me-1"></i>
-              <i class="bi bi-gear-fill me-2"></i>Proxy Configuration
-            </div>
-            <div class="card-body collapse-section collapsed" id="section-config">
-              <form id="configForm">
-                <div class="row">
-                  <div class="col-6 mb-2">
-                    <label class="form-label" style="font-size:10px;margin-bottom:2px">Listen Address</label>
-                    <input type="text" class="form-control form-control-sm" id="listenAddr" value=":8080" onchange="saveConfigValue('listenAddr', 'listenAddr')">
-                  </div>
-                  <div class="col-6 mb-2">
-                    <label class="form-label" style="font-size:10px;margin-bottom:2px">Rotation</label>
-                    <input type="text" class="form-control form-control-sm" id="rotationInterval" value="6h" onchange="saveConfigValue('rotationInterval', 'rotationInterval')">
-                  </div>
-                </div>
-                <div class="row">
-                  <div class="col-8 mb-2">
-                    <label class="form-label" style="font-size:10px;margin-bottom:2px">Upstream URL</label>
-                    <input type="url" class="form-control form-control-sm" id="upstreamUrl" value="https://www.codebuff.com" onchange="saveConfigValue('upstreamUrl', 'upstreamBaseURL')">
-                  </div>
-                  <div class="col-4 mb-2">
-                    <label class="form-label" style="font-size:10px;margin-bottom:2px">Timeout</label>
-                    <input type="text" class="form-control form-control-sm" id="requestTimeout" value="15m" onchange="saveConfigValue('requestTimeout', 'requestTimeout')">
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
+
       </div>
     </div>
   </div>
   </div>
   </div>
 
+  <div class="modal fade" id="keysModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content" style="background:#1a1d23;color:white;border:1px solid rgba(255,255,255,0.1)">
+        <div class="modal-header border-bottom-0"><h5 class="modal-title"><i class="bi bi-key-fill me-2"></i><span data-i18n="modal_manage_keys">Manage Keys</span></h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body" id="keysModalBody">
+          <div id="keysList"></div>
+          <hr style="border-color:rgba(255,255,255,0.1)">
+          <div class="mb-3">
+            <label class="form-label" data-i18n="modal_add_key">Add New Key</label>
+            <input type="text" class="form-control form-control-sm mb-2" id="newKeyName" placeholder="Key name" data-i18n-placeholder="key_name_placeholder">
+            <input type="text" class="form-control form-control-sm mb-2" id="newKey" placeholder="UMANS API key (sk-...)" data-i18n-placeholder="key_value_placeholder">
+            <button class="btn btn-success btn-sm w-100" onclick="addKey()"><i class="bi bi-plus-circle me-1"></i><span data-i18n="btn_add_key">Add Key</span></button>
+          </div>
+        </div>
+        <div class="modal-footer border-top-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal" data-i18n="btn_close">Close</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="platformLoginModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content" style="background:#1a1d23;color:white;border:1px solid rgba(255,255,255,0.1)">
+        <div class="modal-header border-bottom-0"><h5 class="modal-title"><i class="bi bi-person-fill me-2"></i><span data-i18n="modal_umans_login">UMANS Login</span></h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="mb-3"><label class="form-label" style="font-size:12px" data-i18n="label_username">Email</label><input type="text" class="form-control form-control-sm" id="platLoginUsername" placeholder="email@example.com" data-i18n-placeholder="username_placeholder"></div>
+          <div class="mb-3"><label class="form-label" style="font-size:12px" data-i18n="label_password">Password</label><input type="password" class="form-control form-control-sm" id="platLoginPassword" placeholder="password" data-i18n-placeholder="password_placeholder"></div>
+          <div id="platLoginStatus" style="display:none" class="mb-2"></div>
+        </div>
+        <div class="modal-footer border-top-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal" data-i18n="btn_cancel">Cancel</button><button class="btn btn-success btn-sm" onclick="savePlatformLogin()"><i class="bi bi-check-circle me-1"></i><span data-i18n="btn_save_and_login">Save & Login</span></button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="logoutConfirmModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+      <div class="modal-content" style="background:#1a1d23;color:white;border:1px solid rgba(255,255,255,0.1)">
+        <div class="modal-header border-bottom-0"><h5 class="modal-title"><i class="bi bi-box-arrow-right me-2"></i><span data-i18n="modal_logout">Logout</span></h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body"><p class="text-muted mb-0" style="font-size:13px" data-i18n="logout_confirm">Log out from UMANS account?</p></div>
+        <div class="modal-footer border-top-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal" data-i18n="btn_cancel">Cancel</button><button class="btn btn-danger btn-sm" onclick="confirmLogout()"><i class="bi bi-box-arrow-right me-1"></i><span data-i18n="btn_logout">Logout</span></button></div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast-container" id="toastContainer"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
   <script>
-    const SURFACE_FNS = {
-      convex_squircle: (x) => Math.pow(1 - Math.pow(1 - x, 4), 0.25),
-    };
-
-    function calculateRefractionProfile(glassThickness, bezelWidth, heightFn, ior, samples) {
-      samples = samples || 128;
-      const eta = 1 / ior;
-      function refract(nx, ny) {
-        const dot = ny;
-        const k = 1 - eta * eta * (1 - dot * dot);
-        if (k < 0) return null;
-        const sq = Math.sqrt(k);
-        return [-(eta * dot + sq) * nx, eta - (eta * dot + sq) * ny];
-      }
-      const profile = new Float64Array(samples);
-      for (let i = 0; i < samples; i++) {
-        const x = i / samples;
-        const y = heightFn(x);
-        const dx = x < 1 ? 0.0001 : -0.0001;
-        const y2 = heightFn(x + dx);
-        const deriv = (y2 - y) / dx;
-        const mag = Math.sqrt(deriv * deriv + 1);
-        const ref = refract(-deriv / mag, -1 / mag);
-        if (!ref) { profile[i] = 0; continue; }
-        profile[i] = ref[0] * ((y * bezelWidth + glassThickness) / ref[1]);
-      }
-      return profile;
+    const SURFACE_FNS = { convex_squircle: (x) => Math.pow(1 - Math.pow(1 - x, 4), 0.25) };
+    function calcRefractionProfile(t, b, hf, ior, s) {
+      s = s||128; const eta = 1/ior; const p = new Float64Array(s);
+      function refr(nx,ny) { const d = ny, k = 1 - eta*eta*(1 - d*d); if (k < 0) return null; const sq = Math.sqrt(k); return [-(eta*d+sq)*nx, eta-(eta*d+sq)*ny]; }
+      for (let i=0;i<s;i++) { const x=i/s, y=hf(x), dx=x<1?.0001:-.0001, y2=hf(x+dx), deriv=(y2-y)/dx, mag=Math.sqrt(deriv*deriv+1), ref=refr(-deriv/mag,-1/mag); if (!ref) {p[i]=0;continue;} p[i]=ref[0]*((y*b+t)/ref[1]); }
+      return p;
     }
-
-    function generateDisplacementMap(w, h, radius, bezelWidth, profile, maxDisp) {
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      const ctx = c.getContext('2d');
-      const img = ctx.createImageData(w, h);
-      const d = img.data;
-      for (let i = 0; i < d.length; i += 4) { d[i] = 128; d[i+1] = 128; d[i+2] = 0; d[i+3] = 255; }
-      const r = radius, rSq = r*r, r1Sq = (r+1)**2;
-      const rBSq = Math.max(r - bezelWidth, 0)**2;
-      const wB = w - r*2, hB = h - r*2, S = profile.length;
-      for (let y1 = 0; y1 < h; y1++) {
-        for (let x1 = 0; x1 < w; x1++) {
-          const x = x1 < r ? x1 - r : x1 >= w - r ? x1 - r - wB : 0;
-          const y = y1 < r ? y1 - r : y1 >= h - r ? y1 - r - hB : 0;
-          const dSq = x*x + y*y;
-          if (dSq > r1Sq || dSq < rBSq) continue;
-          const dist = Math.sqrt(dSq);
-          const fromSide = r - dist;
-          const op = dSq < rSq ? 1 : 1 - (dist - Math.sqrt(rSq)) / (Math.sqrt(r1Sq) - Math.sqrt(rSq));
-          if (op <= 0 || dist === 0) continue;
-          const cos = x / dist, sin = y / dist;
-          const bi = Math.min(((fromSide / bezelWidth) * S) | 0, S - 1);
-          const disp = profile[bi] || 0;
-          const dX = (-cos * disp) / maxDisp, dY = (-sin * disp) / maxDisp;
-          const idx = (y1 * w + x1) * 4;
-          d[idx] = (128 + dX * 127 * op + 0.5) | 0;
-          d[idx+1] = (128 + dY * 127 * op + 0.5) | 0;
-        }
-      }
-      ctx.putImageData(img, 0, 0);
-      return c.toDataURL();
+    function genDispMap(w,h,r,bw,prof,maxD) {
+      const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d'), img=ctx.createImageData(w,h), d=img.data;
+      for (let i=0;i<d.length;i+=4){d[i]=128;d[i+1]=128;d[i+2]=0;d[i+3]=255;}
+      const rSq=r*r,r1Sq=(r+1)**2,rBSq=Math.max(r-bw,0)**2,wB=w-r*2,hB=h-r*2,S=prof.length;
+      for (let y1=0;y1<h;y1++)for(let x1=0;x1<w;x1++){const x=x1<r?x1-r:x1>=w-r?x1-r-wB:0, y=y1<r?y1-r:y1>=h-r?y1-r-hB:0, dSq=x*x+y*y; if(dSq>r1Sq||dSq<rBSq)continue; const dist=Math.sqrt(dSq), fromSide=r-dist, op=dSq<rSq?1:1-(dist-Math.sqrt(rSq))/(Math.sqrt(r1Sq)-Math.sqrt(rSq)); if(op<=0||dist===0)continue; const cos=x/dist, sin=y/dist, bi=Math.min(((fromSide/bw)*S)|0,S-1), disp=prof[bi]||0, dX=(-cos*disp)/maxD, dY=(-sin*disp)/maxD, idx=(y1*w+x1)*4; d[idx]=(128+dX*127*op+.5)|0; d[idx+1]=(128+dY*127*op+.5)|0;}
+      ctx.putImageData(img,0,0); return c.toDataURL();
     }
-
-    function generateSpecularMap(w, h, radius, bezelWidth, angle) {
-      angle = angle != null ? angle : Math.PI / 3;
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      const ctx = c.getContext('2d');
-      const img = ctx.createImageData(w, h);
-      const d = img.data; d.fill(0);
-      const r = radius, rSq = r*r, r1Sq = (r+1)**2;
-      const rBSq = Math.max(r - bezelWidth, 0)**2;
-      const wB = w - r*2, hB = h - r*2;
-      const sv = [Math.cos(angle), Math.sin(angle)];
-      for (let y1 = 0; y1 < h; y1++) {
-        for (let x1 = 0; x1 < w; x1++) {
-          const x = x1 < r ? x1 - r : x1 >= w - r ? x1 - r - wB : 0;
-          const y = y1 < r ? y1 - r : y1 >= h - r ? y1 - r - hB : 0;
-          const dSq = x*x + y*y;
-          if (dSq > r1Sq || dSq < rBSq) continue;
-          const dist = Math.sqrt(dSq);
-          const fromSide = r - dist;
-          const op = dSq < rSq ? 1 : 1 - (dist - Math.sqrt(rSq)) / (Math.sqrt(r1Sq) - Math.sqrt(rSq));
-          if (op <= 0 || dist === 0) continue;
-          const cos = x / dist, sin = -y / dist;
-          const dot = Math.abs(cos * sv[0] + sin * sv[1]);
-          const edge = Math.sqrt(Math.max(0, 1 - (1 - fromSide)**2));
-          const coeff = dot * edge;
-          const col = (255 * coeff) | 0;
-          const alpha = (col * coeff * op) | 0;
-          const idx = (y1 * w + x1) * 4;
-          d[idx] = col; d[idx+1] = col; d[idx+2] = col; d[idx+3] = alpha;
-        }
-      }
-      ctx.putImageData(img, 0, 0);
-      return c.toDataURL();
+    function genSpecMap(w,h,r,bw,angle) {
+      angle=angle!=null?angle:Math.PI/3; const c=document.createElement('canvas'); c.width=w;c.height=h; const ctx=c.getContext('2d'), img=ctx.createImageData(w,h), d=img.data; d.fill(0);
+      const rSq=r*r,r1Sq=(r+1)**2,rBSq=Math.max(r-bw,0)**2,wB=w-r*2,hB=h-r*2,sv=[Math.cos(angle),Math.sin(angle)];
+      for(let y1=0;y1<h;y1++)for(let x1=0;x1<w;x1++){const x=x1<r?x1-r:x1>=w-r?x1-r-wB:0,y=y1<r?y1-r:y1>=h-r?y1-r-hB:0,dSq=x*x+y*y;if(dSq>r1Sq||dSq<rBSq)continue;const dist=Math.sqrt(dSq),fromSide=r-dist,op=dSq<rSq?1:1-(dist-Math.sqrt(rSq))/(Math.sqrt(r1Sq)-Math.sqrt(rSq));if(op<=0||dist===0)continue;const cos=x/dist,sin=-y/dist,dot=Math.abs(cos*sv[0]+sin*sv[1]),edge=Math.sqrt(Math.max(0,1-(1-fromSide)**2)),coeff=dot*edge,col=(255*coeff)|0,alpha=(col*coeff*op)|0,idx=(y1*w+x1)*4;d[idx]=col;d[idx+1]=col;d[idx+2]=col;d[idx+3]=alpha;}
+      ctx.putImageData(img,0,0); return c.toDataURL();
     }
-
     function initLiquidGlass() {
-      const cards = document.querySelectorAll('[data-glass]');
-      const defs = document.getElementById('glass-defs');
-      let filterIndex = 0;
+      const cards = document.querySelectorAll('[data-glass]'), defs = document.getElementById('glass-defs');
+      defs.innerHTML = '';
+      cards.forEach(c => { const p = c.querySelector('.glass-panel'); if (p) { p.style.backdropFilter = ''; p.style.webkitBackdropFilter = ''; } });
+      let fi = 0;
       cards.forEach(card => {
-        if (!card.querySelector('.glass-panel')) return;
+        const panel = card.querySelector('.glass-panel');
+        if (!panel) return;
         requestAnimationFrame(() => {
           const rect = card.getBoundingClientRect();
           if (rect.width < 2 || rect.height < 2) return;
-          const w = Math.round(rect.width);
-          const h = Math.round(rect.height);
-          const radius = 12, bezelW = 30, glassThick = 60, ior = 2.5;
-          const blurAmt = 0.3, specOpacity = 0.5, specSat = 4;
-          const heightFn = SURFACE_FNS.convex_squircle;
-          const profile = calculateRefractionProfile(glassThick, bezelW, heightFn, ior, 128);
-          const maxDisp = Math.max(...Array.from(profile).map(Math.abs)) || 1;
-          const dispUrl = generateDisplacementMap(w, h, radius, bezelW, profile, maxDisp);
-          const specUrl = generateSpecularMap(w, h, radius, bezelW * 2.5);
-          const scale = maxDisp * 1.0;
-          const filterId = 'liquid-glass-' + filterIndex++;
+          const w = Math.round(rect.width), h = Math.round(rect.height), radius = 12, bezelW = 30, glassThick = 60, ior = 2.5, blurAmt = 0.3, specOpacity = 0.5, specSat = 4;
+          const profile = calcRefractionProfile(glassThick, bezelW, SURFACE_FNS.convex_squircle, ior, 128);
+          const maxD = Math.max(...Array.from(profile).map(Math.abs)) || 1;
+          const dispUrl = genDispMap(w, h, radius, bezelW, profile, maxD);
+          const specUrl = genSpecMap(w, h, radius, bezelW * 2.5);
+          const filterId = 'lg-' + (fi++);
           const filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
-          filter.setAttribute('id', filterId);
-          filter.setAttribute('x', '0%');
-          filter.setAttribute('y', '0%');
-          filter.setAttribute('width', '100%');
-          filter.setAttribute('height', '100%');
-          filter.innerHTML = `
-            <feGaussianBlur in="SourceGraphic" stdDeviation="${blurAmt}" result="blurred_source" />
-            <feImage href="${dispUrl}" x="0" y="0" width="${w}" height="${h}" result="disp_map" />
-            <feDisplacementMap in="blurred_source" in2="disp_map" scale="${scale}" xChannelSelector="R" yChannelSelector="G" result="displaced" />
-            <feColorMatrix in="displaced" type="saturate" values="${specSat}" result="displaced_sat" />
-            <feImage href="${specUrl}" x="0" y="0" width="${w}" height="${h}" result="spec_layer" />
-            <feComposite in="displaced_sat" in2="spec_layer" operator="in" result="spec_masked" />
-            <feComponentTransfer in="spec_layer" result="spec_faded"><feFuncA type="linear" slope="${specOpacity}" /></feComponentTransfer>
-            <feBlend in="spec_masked" in2="displaced" mode="normal" result="with_sat" />
-            <feBlend in="spec_faded" in2="with_sat" mode="normal" />
-          `;
+          filter.setAttribute('id', filterId); filter.setAttribute('x','-20%'); filter.setAttribute('y','-20%'); filter.setAttribute('width','140%'); filter.setAttribute('height','140%');
+          filter.innerHTML = `<feGaussianBlur in="SourceGraphic" stdDeviation="${blurAmt}" result="blurred_source"/><feImage href="${dispUrl}" x="0" y="0" width="${w}" height="${h}" result="disp_map"/><feDisplacementMap in="blurred_source" in2="disp_map" scale="${maxD*1}" xChannelSelector="R" yChannelSelector="G" result="displaced"/><feColorMatrix in="displaced" type="saturate" values="${specSat}" result="displaced_sat"/><feImage href="${specUrl}" x="0" y="0" width="${w}" height="${h}" result="spec_layer"/><feComposite in="displaced_sat" in2="spec_layer" operator="in" result="spec_masked"/><feComponentTransfer in="spec_layer" result="spec_faded"><feFuncA type="linear" slope="${specOpacity}"/></feComponentTransfer><feBlend in="spec_masked" in2="displaced" mode="normal" result="with_sat"/><feBlend in="spec_faded" in2="with_sat" mode="normal"/>`;
           defs.appendChild(filter);
-          const panel = card.querySelector('.glass-panel');
-          if (!panel) return;
           panel.style.backdropFilter = `url(#${filterId})`;
           panel.style.webkitBackdropFilter = `url(#${filterId})`;
+          void panel.offsetHeight;
         });
       });
     }
 
-    let proxyData = null;
-    let config = {};
-    let models = [];
-    let modelMetadata = {};
-    let enabledModels = [];
-    let blurTokensEnabled = false;
-    let oauthSession = null;
-    let oauthPollTimer = null;
-    let adsEnabled = true;
-    let remainingMsAtFetch = 0;
-    let remainingMsTimestamp = 0;
-    let countryCodeSet = false;
-    let adsList = [];
-    let currentAdIdx = 0;
-    let adImpressionSent = new Set();
+    let proxyData = null, config = {}, enabledModels = [], allModels = [], allDisplayNames = {}, blurTokensEnabled = false, editingIdx = -1, umansLoggedIn = false, umansEmail = '', umansUserId = '';
+    let wallpaperLoaded = false;
+    const DEFAULT_FREEGEN_PROMPT = 'A breathtaking sci-fi landscape with glowing neon structures floating above a misty alien ocean, cinematic lighting, 8K, hyper-detailed, ethereal atmosphere, 16:9 wallpaper';
+    let usageDays = [], usagePage = 0, usagePerPage = 10;
 
-    function showToast(message, type = 'info') {
-      const toast = document.createElement('div');
-      toast.className = `toast align-items-center text-white bg-${type} border-0 show`;
-      toast.innerHTML = `<div class="d-flex"><div class="toast-body">${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
-      document.getElementById('toastContainer').appendChild(toast);
-      setTimeout(() => toast.remove(), 3000);
+    // --- i18n runtime ---
+    function t(key, fallback) {
+      if (window.__i18n && Object.prototype.hasOwnProperty.call(window.__i18n, key)) return window.__i18n[key];
+      return fallback !== undefined ? fallback : key;
+    }
+    function tHtml(key, fallback) {
+      if (window.__i18n && Object.prototype.hasOwnProperty.call(window.__i18n, key)) return window.__i18n[key];
+      return fallback !== undefined ? fallback : key;
+    }
+    function applyI18nToDocument() {
+      const dict = window.__i18n || {};
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (!Object.prototype.hasOwnProperty.call(dict, key)) return;
+        const isTpl = el.hasAttribute('data-i18n-template');
+        if (isTpl) {
+          const template = dict[key];
+          if (key === 'overlay_translating_sub') {
+            el.textContent = template.replace('{lang}', _currentLocaleNative || _currentLocale || '');
+          } else {
+            el.textContent = template;
+          }
+        } else {
+          el.textContent = dict[key];
+        }
+      });
+      document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        const key = el.getAttribute('data-i18n-placeholder');
+        if (Object.prototype.hasOwnProperty.call(dict, key)) el.setAttribute('placeholder', dict[key]);
+      });
+      document.querySelectorAll('[data-i18n-title]').forEach(el => {
+        const key = el.getAttribute('data-i18n-title');
+        if (Object.prototype.hasOwnProperty.call(dict, key)) el.setAttribute('title', dict[key]);
+      });
     }
 
-    async function fetchBingWallpaper() {
+    let _currentLocale = 'en';
+    let _currentLocaleNative = 'English';
+    let _hasApiKey = false;
+    let _i18nNavigated = false;
+    const LOCALE_NATIVE_NAMES = {
+      en: 'English', de: 'Deutsch', fr: 'Français', es: 'Español', it: 'Italiano',
+      pt: 'Português', nl: 'Nederlands', pl: 'Polski', ru: 'Русский', uk: 'Українська',
+      tr: 'Türkçe', ja: '日本語', ko: '한국어', zh: '中文', ar: 'العربية',
+      cs: 'Čeština', ro: 'Română', hu: 'Magyar', sv: 'Svenska', da: 'Dansk',
+      fi: 'Suomi', no: 'Norsk', el: 'Ελληνικά', he: 'עברית', th: 'ไทย',
+      vi: 'Tiếng Việt', id: 'Bahasa Indonesia', hi: 'हिन्दी',
+    };
+    function getNativeName(locale) { return LOCALE_NATIVE_NAMES[locale] || (locale || '').toUpperCase(); }
+    function detectDashboardLocale() {
       try {
-        const r = await fetch('/api/bg');
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const data = await r.json();
-        if (data.url) {
-          document.body.style.backgroundImage = `url("${data.url}")`;
-          document.body.style.backgroundRepeat = 'no-repeat';
-          document.body.style.backgroundPosition = 'center';
-          document.body.style.backgroundSize = 'cover';
-          document.body.style.backgroundAttachment = 'fixed';
-          document.body.style.backgroundColor = '#0d1117';
+        const override = (new URLSearchParams(location.search).get('locale') || '').toLowerCase().split(/[-_]/)[0];
+        if (override) return override;
+        const stored = (localStorage.getItem('preferredLocale') || '').toLowerCase().split(/[-_]/)[0];
+        if (stored) return stored;
+        const navs = (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || 'en']);
+        for (const raw of navs) { const tag = (raw || '').toLowerCase().split(/[-_]/)[0]; if (tag) return tag; }
+      } catch (e) {}
+      return 'en';
+    }
+    async function fetchI18nConfig() {
+      try { const r = await fetch('/api/i18n?config=1&nav=' + encodeURIComponent(detectDashboardLocale())); if (!r.ok) return {}; const d = await r.json(); _hasApiKey = !!d.has_key; return d; } catch (e) { return {}; }
+    }
+    async function fetchTranslations(locale, withGenerate) {
+      const u = new URL('/api/i18n', location.origin);
+      u.searchParams.set('locale', locale);
+      if (withGenerate) u.searchParams.set('generate', '1');
+      const resp = await fetch(u.toString());
+      if (!resp.ok) throw new Error('i18n http ' + resp.status);
+      return await resp.json();
+    }
+    function showTranslateOverlay(subtitle) {
+      const ov = document.getElementById('translateOverlay'); if (!ov) return;
+      const sub = ov.querySelector('.subtitle'); if (sub && subtitle) sub.textContent = subtitle;
+      ov.classList.add('show');
+    }
+    function hideTranslateOverlay() {
+      const ov = document.getElementById('translateOverlay'); if (ov) ov.classList.remove('show');
+    }
+    let _translateCancelled = false;
+    function bindTranslateCancel() {
+      const btn = document.getElementById('translateCancelBtn');
+      if (!btn) return;
+      btn.onclick = () => { _translateCancelled = true; hideTranslateOverlay(); };
+    }
+    async function applyTranslations(bundle, force) {
+      if (_translateCancelled && !force) return;
+      window.__i18n = bundle.strings || {};
+      _currentLocale = bundle.locale || 'en';
+      _currentLocaleNative = getNativeName(_currentLocale);
+      applyI18nToDocument();
+      if (typeof renderModels === 'function') try { renderModels(); } catch (e) {}
+      if (typeof renderTokenPools === 'function') try { renderTokenPools(); } catch (e) {}
+      if (typeof updateSsModeStatus === 'function') try { updateSsModeStatus(); } catch (e) {}
+      if (typeof updateTestChatModels === 'function') try { updateTestChatModels(); } catch (e) {}
+      if (typeof updateStats === 'function') try { updateStats(); } catch (e) {}
+      if (typeof renderUsagePage === 'function') try { renderUsagePage(); } catch (e) {}
+      if (typeof loadWallpaperFromConfig === 'function') try { loadWallpaperFromConfig(); } catch (e) {}
+      setTimeout(initLiquidGlass, 50);
+    }
+
+    async function enableAutotranslate(forcedLocale) {
+      const locale = forcedLocale || detectDashboardLocale();
+      if (locale === 'en' || !_hasApiKey) {
+        if (locale !== 'en' && !_hasApiKey) {
+          // No key: keep English but store nothing
+        }
+        return;
+      }
+      _currentLocale = locale;
+      _currentLocaleNative = getNativeName(locale);
+      _translateCancelled = false;
+      const subtitleTpl = t('overlay_translating_sub', 'Translating UI to {lang}...');
+      showTranslateOverlay(subtitleTpl.replace('{lang}', _currentLocaleNative));
+      try {
+        let bundle = await fetchTranslations(locale, false);
+        if (bundle.source !== 'umans-flash' && bundle.source !== 'builtin' && locale !== 'en') {
+          bundle = await fetchTranslations(locale, true);
+        }
+        if (!_translateCancelled) {
+          await applyTranslations(bundle);
+          localStorage.setItem('preferredLocale', locale);
+          const cb = document.getElementById('autotranslateCheckbox');
+          if (cb && !cb.checked) cb.checked = true;
         }
       } catch (e) {
-        document.body.style.backgroundImage = 'none';
-        document.body.style.backgroundColor = '#0d1117';
+        console.error('[i18n] failed', e);
+        showToast(t('toast_translation_failed', 'Translation failed: {error}').replace('{error}', e.message), 'danger');
+      } finally {
+        hideTranslateOverlay();
       }
     }
-
-    async function saveConfigValue(elementId, configKey) {
-      const value = document.getElementById(elementId).value;
-      const payload = {};
-      payload[configKey] = value;
-      try {
-        const resp = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        const data = await resp.json();
-        if (data.success) { showToast(configKey + ' saved', 'info'); config = data.config; }
-      } catch (e) {}
+    function disableAutotranslate() {
+      localStorage.removeItem('preferredLocale');
+      location.reload();
     }
 
-    async function toggleWallpaper() {
-      const checked = document.getElementById('wallpaperToggle').checked;
-      config.enableWallpaper = checked;
-      fetchBingWallpaper();
-      try {
-        const resp = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enableWallpaper: checked }) });
-        const data = await resp.json();
-        if (data.success) { showToast('Wallpaper setting saved', 'info'); config = data.config; }
-      } catch (e) {}
-    }
+    function showToast(m, t) { const d=document.createElement('div'); d.className=`toast align-items-center text-white bg-${t||'info'} border-0 show`; d.innerHTML=`<div class="d-flex"><div class="toast-body">${m}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`; document.getElementById('toastContainer').appendChild(d); setTimeout(()=>d.remove(),3000); }
+    function escapeHtml(t){if(t==null)return '';const d=document.createElement('div');d.textContent=String(t);return d.innerHTML;}
+    function toggleSection(n) { const b=document.getElementById('section-'+n),c=document.querySelector('[data-section="'+n+'"]'),i=c?.querySelector('.toggle-icon'); if(b&&i){b.classList.toggle('collapsed');i.classList.toggle('collapsed');}setTimeout(initLiquidGlass,50); }
 
-    function toggleBlurTokens(checked) {
-      blurTokensEnabled = checked;
+    function setWallpaperActive(source) {
+      document.querySelectorAll('.btn-wp').forEach(b => b.classList.toggle('active', b.dataset.wp === source));
+    }
+    async function setWallpaper(source) {
+      setWallpaperActive(source);
+      updateFreegenPromptVisibility(source);
+      if (source === 'none') {
+        document.body.style.backgroundImage = 'none'; document.body.style.backgroundColor = '#0d1117';
+      } else if (source === 'bing') {
+        try { const r = await fetch('/api/bg'); if (!r.ok) throw Error(); const blob = await r.blob(); document.body.style.backgroundImage = `url("${URL.createObjectURL(blob)}")`; document.body.style.backgroundRepeat='no-repeat';document.body.style.backgroundPosition='center';document.body.style.backgroundSize='cover';document.body.style.backgroundAttachment='fixed';document.body.style.backgroundColor='#0d1117'; } catch { document.body.style.backgroundImage='none';document.body.style.backgroundColor='#0d1117'; }
+      } else if (source === 'wallhaven') {
+        try { const r = await fetch('/api/bg-wallhaven'); if (!r.ok) throw Error(); const blob = await r.blob(); document.body.style.backgroundImage = `url("${URL.createObjectURL(blob)}")`; document.body.style.backgroundRepeat='no-repeat';document.body.style.backgroundPosition='center';document.body.style.backgroundSize='cover';document.body.style.backgroundAttachment='fixed';document.body.style.backgroundColor='#0d1117'; } catch { document.body.style.backgroundImage='none';document.body.style.backgroundColor='#0d1117'; }
+      } else if (source === 'freegen') {
+        try {
+          const r = await fetch('/api/bg-freegen?wait=1');
+          if (!r.ok) throw Error();
+          const blob = await r.blob();
+          document.body.style.backgroundImage = `url("${URL.createObjectURL(blob)}")`;
+          document.body.style.backgroundRepeat='no-repeat';
+          document.body.style.backgroundPosition='center';
+          document.body.style.backgroundSize='cover';
+          document.body.style.backgroundAttachment='fixed';
+          document.body.style.backgroundColor='#0d1117';
+        } catch {
+          document.body.style.backgroundImage='none';
+          document.body.style.backgroundColor='#0d1117';
+        }
+      }
+      try { await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wallpaperSource:source})}); } catch {}
+    }
+    function updateFreegenPromptVisibility(source) {
+      const el = document.getElementById('freegenPromptContainer');
+      if (el) el.style.display = source === 'freegen' ? 'block' : 'none';
+    }
+    function useDefaultFreegenPrompt() {
+      const inp = document.getElementById('freegenPromptInput');
+      if (inp) inp.value = DEFAULT_FREEGEN_PROMPT;
+    }
+    async function generateFreegenWallpaper() {
+      const input = document.getElementById('freegenPromptInput');
+      const btn = document.getElementById('freegenGenerateBtn');
+      const status = document.getElementById('freegenStatus');
+      const prompt = input.value.trim();
+      if (!prompt) { showToast(t('toast_freegen_missing_prompt', 'Enter a FreeGen prompt'), 'warning'); return; }
+      btn.disabled = true; btn.innerHTML = '<span class=\"spinner-border spinner-border-sm\" role=\"status\"></span> ' + t('freegen_generate', 'Generate');
+      status.textContent = t('freegen_status_generating', 'Generating via FreeGen (this may take ~10-30s)...');
+      try {
+        const r = await fetch('/api/bg-freegen', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, ratio: '16:9', wait: true })
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+        const blob = await r.blob();
+        document.body.style.backgroundImage = `url("${URL.createObjectURL(blob)}")`;
+        document.body.style.backgroundRepeat='no-repeat';
+        document.body.style.backgroundPosition='center';
+        document.body.style.backgroundSize='cover';
+        document.body.style.backgroundAttachment='fixed';
+        document.body.style.backgroundColor='#0d1117';
+        status.textContent = t('freegen_status_applied', 'Wallpaper applied.');
+        showToast(t('toast_freegen_applied', 'FreeGen wallpaper generated!'), 'success');
+      } catch (e) {
+        status.textContent = t('freegen_status_error_prefix', 'Error:') + ' ' + e.message;
+        showToast(t('toast_freegen_failed', 'FreeGen generation failed: {error}').replace('{error}', e.message), 'danger');
+      } finally {
+        btn.disabled = false; btn.textContent = t('freegen_generate', 'Generate');
+      }
+    }
+    function updateSsModeStatus() {
+      const label = document.getElementById('ssModeLabel');
+      const input = document.getElementById('blurTokensEnv');
+      if (label) label.textContent = blurTokensEnabled ? t('ss_mode_on','On') : t('ss_mode_off','Off');
+      if (input) input.checked = blurTokensEnabled;
+    }
+    function toggleBlurTokens(c) {
+      blurTokensEnabled = c;
+      updateSsModeStatus();
       renderTokenPools();
-    }
-
-    function toggleAds(checked) {
-      adsEnabled = checked;
-      try { localStorage.setItem('adsEnabled', checked); } catch (e) {}
-      const toggleEnv = document.getElementById('adsToggleEnv');
-      if (toggleEnv) toggleEnv.checked = checked;
-      if (!checked) {
-        const slidesContainer = document.getElementById('adSlidesContainer');
-        const dotsContainer = document.getElementById('adDots');
-        const counterLabel = document.getElementById('adCounterLabel');
-        if (slidesContainer) slidesContainer.innerHTML = '<div style="font-size:12px;color:rgba(13,17,23,0.4);text-align:center;padding:12px 0">Ads disabled</div>';
-        if (dotsContainer) dotsContainer.innerHTML = '';
-        if (counterLabel) counterLabel.textContent = 'Ads off';
-        const arrows = document.querySelectorAll('.ad-arrow');
-        arrows.forEach(a => a.style.display = 'none');
-      } else {
-        const arrows = document.querySelectorAll('.ad-arrow');
-        arrows.forEach(a => a.style.display = '');
-        fetchAds().then(() => { renderAdInTokenCard(); setTimeout(() => initLiquidGlass(), 100); });
-      }
-    }
-
-    async function fetchAds() {
-      if (!adsEnabled) return;
-      try {
-        const resp = await fetch('/api/ads');
-        if (!resp.ok) return;
-        const data = await resp.json();
-        let ads = [];
-        if (Array.isArray(data)) ads = data;
-        else if (data && data.ads && Array.isArray(data.ads)) ads = data.ads;
-        if (ads.length > 0) {
-          adsList = ads.map(ad => ({
-            adHtml: ad.html || ad.body || '',
-            adTitle: ad.title || ad.name || '',
-            adLink: ad.clickUrl || ad.ctaUrl || ad.link || ad.url || '#',
-            adImage: ad.favicon || ad.image || ad.thumbnail || ad.logo || '',
-            adSponsor: ad.sponsor || ad.advertiser || ad.company || '',
-            adCallToAction: ad.cta || ad.callToAction || '',
-            adDescription: ad.adText || ad.description || '',
-            adImpUrl: ad.impUrl || ad.impressionUrl || ad.pixelUrl || ''
-          }));
-          currentAdIdx = 0;
-          adImpressionSent.clear();
-          try { localStorage.setItem('_cachedAds', JSON.stringify(adsList)); } catch (e) {}
-        } else if (adsList.length === 0) {
-          try { const cached = localStorage.getItem('_cachedAds'); if (cached) adsList = JSON.parse(cached); } catch (e) {}
-        }
-      } catch (e) {
-        if (adsList.length === 0) {
-          try { const cached = localStorage.getItem('_cachedAds'); if (cached) adsList = JSON.parse(cached); } catch (e2) {}
-        }
-      }
-    }
-
-    function rotateAd() {
-      if (!adsEnabled || adsList.length === 0) return;
-      currentAdIdx = (currentAdIdx + 1) % adsList.length;
-      goToAdSlide(currentAdIdx);
-    }
-
-    function prevAd() {
-      if (!adsEnabled || adsList.length === 0) return;
-      currentAdIdx = (currentAdIdx - 1 + adsList.length) % adsList.length;
-      goToAdSlide(currentAdIdx);
-    }
-
-    function nextAd() {
-      if (!adsEnabled || adsList.length === 0) return;
-      currentAdIdx = (currentAdIdx + 1) % adsList.length;
-      goToAdSlide(currentAdIdx);
-    }
-
-    function goToAdSlide(idx) {
-      const slides = document.querySelectorAll('.ad-slide');
-      const dots = document.querySelectorAll('.ad-dot');
-      slides.forEach((s, i) => s.classList.toggle('active', i === idx));
-      dots.forEach((d, i) => d.classList.toggle('active', i === idx));
-      currentAdIdx = idx;
-      const counterLabel = document.getElementById('adCounterLabel');
-      if (counterLabel && adsList.length > 0) {
-        counterLabel.textContent = 'Ad ' + (idx + 1) + '/' + adsList.length;
-      }
-      const ad = adsList[idx];
-      if (ad && ad.adImpUrl && !adImpressionSent.has(idx)) {
-        adImpressionSent.add(idx);
-        fetch('/api/ads/impression', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ impUrl: ad.adImpUrl, mode: 'LITE' }) }).catch(() => {});
-      }
-    }
-
-    function renderAdInTokenCard() {
-      const slidesContainer = document.getElementById('adSlidesContainer');
-      const dotsContainer = document.getElementById('adDots');
-      const counterLabel = document.getElementById('adCounterLabel');
-      const arrows = document.querySelectorAll('.ad-arrow');
-      if (!slidesContainer || !dotsContainer) return;
-      if (!adsEnabled) {
-        slidesContainer.innerHTML = '<div style="font-size:12px;color:rgba(13,17,23,0.4);text-align:center;padding:12px 0">Ads disabled</div>';
-        dotsContainer.innerHTML = '';
-        if (counterLabel) counterLabel.textContent = 'Ads off';
-        arrows.forEach(a => a.style.display = 'none');
-        return;
-      }
-      arrows.forEach(a => a.style.display = adsList.length > 1 ? '' : 'none');
-      if (adsList.length === 0) {
-        slidesContainer.innerHTML = '<div style="font-size:12px;color:rgba(13,17,23,0.4);text-align:center;padding:12px 0">No ads available</div>';
-        dotsContainer.innerHTML = '';
-        if (counterLabel) counterLabel.textContent = 'Ad';
-        return;
-      }
-      if (currentAdIdx >= adsList.length) currentAdIdx = 0;
-      slidesContainer.innerHTML = adsList.map((ad, i) => {
-        let inner = '';
-        if (ad.adHtml) {
-          inner = ad.adHtml;
-        } else if (ad.adImage || ad.adTitle) {
-          inner = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            ${ad.adImage ? `<img src="${escapeHtml(ad.adImage)}" alt="${escapeHtml(ad.adTitle)}" style="width:40px;height:40px;border-radius:6px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,0.15)">` : ''}
-            <div style="flex:1;min-width:0">
-              ${ad.adSponsor ? `<div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.4);margin-bottom:1px;text-align:left">${escapeHtml(ad.adSponsor)}</div>` : ''}
-              ${ad.adTitle ? `<div style="font-weight:600;font-size:12px;color:#0d1117;margin-bottom:1px;text-align:left">${escapeHtml(ad.adTitle)}</div>` : ''}
-              ${ad.adDescription ? `<div style="font-size:10px;color:rgba(13,17,23,0.5);line-height:1.3;text-align:left">${escapeHtml(ad.adDescription)}</div>` : ''}
-            </div>
-            ${ad.adCallToAction ? `<a href="${escapeHtml(ad.adLink)}" target="_blank" rel="noopener sponsored" style="background:rgba(13,17,23,0.1);border:1px solid rgba(13,17,23,0.2);color:#0d1117;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:600;white-space:nowrap;flex-shrink:0;text-decoration:none">${escapeHtml(ad.adCallToAction)}</a>` : ''}
-          </div>`;
-        }
-        if (!inner) inner = '<div style="font-size:12px;color:rgba(13,17,23,0.4)">No ad content</div>';
-        return `<div class="ad-slide${i === currentAdIdx ? ' active' : ''}" style="padding:4px 0">${inner}</div>`;
-      }).join('');
-      dotsContainer.innerHTML = adsList.map((_, i) => `<span class="ad-dot${i === currentAdIdx ? ' active' : ''}" onclick="goToAdSlide(${i})"><span class="dot-indicator"></span></span>`).join('');
-      if (counterLabel) counterLabel.textContent = adsList.length > 1 ? 'Ad ' + (currentAdIdx + 1) + '/' + adsList.length : 'Ad';
-    }
-
-    async function loadConfiguration() {
-      try {
-        const healthResponse = await fetch('/healthz');
-        proxyData = await healthResponse.json();
-        const configResponse = await fetch('/api/config');
-        const configData = await configResponse.json();
-        if (configData) {
-          const cfg = configData.config || configData;
-          config = cfg;
-          enabledModels = Array.isArray(cfg.enabledModels) ? cfg.enabledModels : [];
-          if (document.getElementById('listenAddr')) document.getElementById('listenAddr').value = cfg.listenAddr || ':8080';
-          if (document.getElementById('upstreamUrl')) document.getElementById('upstreamUrl').value = cfg.upstreamBaseURL || 'https://www.codebuff.com';
-          if (document.getElementById('rotationInterval')) document.getElementById('rotationInterval').value = cfg.rotationInterval || '6h';
-          if (document.getElementById('requestTimeout')) document.getElementById('requestTimeout').value = cfg.requestTimeout || '15m';
-          if (document.getElementById('wallpaperToggle')) document.getElementById('wallpaperToggle').checked = cfg.enableWallpaper !== false;
-        }
-        const modelsResponse = await fetch('/api/models');
-        const modelsData = await modelsResponse.json();
-        if (modelsData && modelsData.models) { models = modelsData.models; modelMetadata = modelsData.model_metadata || {}; renderModels(); }
-        renderTokenPools();
-        updateStats();
-      } catch (error) {
-        showToast('Failed to load configuration', 'danger');
+      const modalEl = document.getElementById('keysModal');
+      if (modalEl && modalEl.classList.contains('show')) {
+        fetch('/api/keys').then(r => r.json()).then(d => renderKeysList(d.keys || []));
       }
     }
 
     function renderTokenPools() {
       const container = document.getElementById('tokenPoolsContainer');
-      if (!proxyData || !proxyData.token_state || proxyData.token_state.length === 0) {
-        container.innerHTML = `
-          <div class="text-center py-4">
-            <i class="bi bi-key" style="font-size:2rem;color:rgba(255,255,255,0.4)"></i>
-            <p class="mt-2 text-muted">No tokens detected</p>
-            <button class="btn btn-sm btn-white-bg mt-2" onclick="startOAuth()"><i class="bi bi-shield-lock-fill me-1"></i>Generate Auth Token</button>
-          </div>`;
-        return;
+      const blur = blurTokensEnabled ? 'token-blurred' : '';
+      if (!proxyData || !proxyData.token_state || !proxyData.token_state.length) {
+        container.innerHTML = '<div class="text-center py-3"><i class="bi bi-key" style="font-size:2rem;color:rgba(255,255,255,0.4)"></i><p class="mt-2 text-muted">' + escapeHtml(t('tokens_none','No API keys')) + '</p></div>';
+        document.getElementById('tokenCountBadge').textContent = '0'; return;
       }
-      const blurClass = blurTokensEnabled ? 'token-blurred' : '';
-      container.innerHTML = proxyData.token_state.map(pool => {
-        const sessionStatus = pool.session_status || 'none';
-        const statusClass = sessionStatus === 'active' ? 'status-online' : 'status-offline';
-        const statusText = sessionStatus.charAt(0).toUpperCase() + sessionStatus.slice(1);
-        let runsHtml = '';
-        if (pool.runs && pool.runs.length > 0) {
-          runsHtml = pool.runs.map(run => `<div class="run-item"><span class="run-agent">${run.agent_id}</span><span class="${blurClass}">${run.run_id.substring(0, 8)}... | Inflight: ${run.inflight} | Requests: ${run.request_count}</span></div>`).join('');
-        }
-        let sessionInfo = '';
-        if (pool.session_instance_id) {
-          sessionInfo = `<div style="margin-top:8px;font-size:0.8rem;color:#ffffff;" class="${blurClass}">Session: ${pool.session_instance_id.substring(0,12)}...${pool.session_expires_at ? ' | Expires: ' + new Date(pool.session_expires_at).toLocaleTimeString() : ''}</div>`;
-        }
-        return `<div class="pool-card"><div class="pool-header"><div class="pool-name">${pool.name}</div><div class="pool-status ${statusClass}">${statusText}</div></div>${runsHtml}${sessionInfo}${pool.last_error ? `<div class="text-danger" style="margin-top:8px;font-size:0.8rem;">${pool.last_error}</div>` : ''}</div>`;
+      document.getElementById('tokenCountBadge').textContent = proxyData.token_state.length;
+      container.innerHTML = proxyData.token_state.map(p => {
+        const isOn = p.status === 'active';
+        return `<div class="pool-card"><div class="pool-header"><div class="pool-name">${escapeHtml(p.name)}</div><span class="badge rounded-pill" style="background:${isOn?'rgba(50,205,50,0.2)':'rgba(220,53,69,0.2)'};color:${isOn?'#32CD32':'#dc3545'};font-size:0.7rem;font-weight:600;border:1px solid ${isOn?'rgba(50,205,50,0.3)':'rgba(220,53,69,0.3)'}">${isOn?t('key_status_active','Active'):t('key_status_inactive','Inactive')}</span></div><div style="font-size:0.85rem;color:rgba(255,255,255,0.7)" class="${blur}">${p.token}</div></div>`;
       }).join('');
     }
 
-    function getModelDisplayName(model) {
-      const meta = modelMetadata[model];
-      if (meta) return meta.premium ? `[LIM] ${meta.displayName}` : meta.displayName;
-      return model.split('/').pop();
+    function scrambleUserId(id) {
+      const arr = id.split('');
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr.join('');
+    }
+    function formatEmailMasked(email) {
+      const at = email.indexOf('@');
+      const blur = 'token-blurred';
+      if (at < 0) {
+        return `<span class="${blur}">${escapeHtml('*'.repeat(email.length))}</span>`;
+      }
+      const localLen = at;
+      const domainLen = email.length - at - 1;
+      return `<span class="${blur}">${escapeHtml('*'.repeat(localLen))}</span>${escapeHtml('@')}<span class="${blur}">${escapeHtml('*'.repeat(domainLen))}</span>`;
     }
 
     function renderModels() {
       const container = document.getElementById('modelsContainer');
-      document.getElementById('modelCountBadge').textContent = `${enabledModels.length}/${models.length}`;
-      if (models.length === 0) { container.innerHTML = '<p class="text-muted">No models available</p>'; return; }
-      container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:3px">${models.map((model, idx) => {
-        const isEnabled = enabledModels.includes(model);
-        return `<div class="model-tag${isEnabled ? ' enabled' : ''}" onclick="toggleModel(${idx})" id="model-${idx}"><input type="checkbox" class="form-check-input"${isEnabled ? ' checked' : ''}><div><div class="model-tag-name">${escapeHtml(getModelDisplayName(model))}</div><div class="model-tag-id" title="${escapeHtml(model)}">${escapeHtml(model)}</div></div></div>`;
+      const badge = document.getElementById('modelCountBadge');
+      const enabled = new Set(enabledModels);
+      if (!allModels.length) {
+        badge.textContent = '0';
+        container.innerHTML = '<div class="text-center py-3"><i class="bi bi-info-circle" style="font-size:24px;color:rgba(255,255,255,0.4)"></i><p class="mt-2 text-muted">' + escapeHtml(t('models_loading','Loading models...')) + '</p></div>'; return;
+      }
+      badge.textContent = enabledModels.length + '/' + allModels.length;
+      container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:1px">${allModels.map((model, idx) => {
+        const isEn = enabled.has(model);
+        const display = allDisplayNames[model] || model.replace(/^umans-/i, '');
+        return `<div class="model-tag${isEn?' enabled':''}" onclick="toggleModel('${escapeHtml(model)}')" id="model-${idx}" title="${escapeHtml(model)}"><input type="checkbox" ${isEn?'checked':''}><div class="model-tag-row"><span class="model-tag-id">${escapeHtml(display)}</span></div></div>`;
       }).join('')}</div>`;
+      setTestChatVisible(allModels.length > 0);
+      updateTestChatModels();
     }
 
-    function toggleModel(idx) {
-      const model = models[idx];
-      const tag = document.getElementById(`model-${idx}`);
-      const checkbox = tag.querySelector('input[type="checkbox"]');
-      const isCurrentlyEnabled = tag.classList.contains('enabled');
-      if (isCurrentlyEnabled) {
-        tag.classList.remove('enabled');
-        checkbox.checked = false;
-        enabledModels = enabledModels.filter(m => m !== model);
+    async function toggleModel(model) {
+      if (!model) return;
+      const isEn = enabledModels.includes(model);
+      if (isEn) {
+        try { const r=await fetch('/api/models/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({models:[model]})}); const d=await r.json(); if(d.success){enabledModels = enabledModels.filter(m=>m!==model); renderModels(); showToast(`${model} ${t('model_disabled','disabled')}`);} else showToast(t('toast_failed_prefix','Failed:') + ' ' + d.error,'danger'); } catch { showToast(t('toast_failed_prefix','Failed:'),'danger'); }
       } else {
-        tag.classList.add('enabled');
-        checkbox.checked = true;
-        if (!enabledModels.includes(model)) enabledModels.push(model);
+        try { const r=await fetch('/api/models/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({models:[model]})}); const d=await r.json(); if(d.success){enabledModels.push(model); renderModels(); showToast(`${model} ${t('model_enabled','enabled')}`);} else showToast(t('toast_failed_prefix','Failed:') + ' ' + d.error,'danger'); } catch { showToast(t('toast_failed_prefix','Failed:'),'danger'); }
       }
-      fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabledModels }) });
-      document.getElementById('modelCountBadge').textContent = `${enabledModels.length}/${models.length}`;
-      showToast(`${getModelDisplayName(model)} ${isCurrentlyEnabled ? 'disabled' : 'enabled'}`, 'info');
     }
 
-    async function startOAuth() {
-      const container = document.getElementById('oauthContainer');
-      container.style.display = 'block';
-      container.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Generating login URL...</p></div>';
+    async function fetchUmansUserStatus() {
+      try { const r=await fetch('/api/umans/user'); const d=await r.json(); umansLoggedIn=d.loggedIn; umansEmail=d.email||''; } catch {}
+    }
+    async function fetchUmansConcurrency() {
+      try { const r=await fetch('/api/umans/concurrency'); const d=await r.json(); umansUserId=d.user_id||''; } catch { umansUserId=''; }
+    }
+
+    async function openKeysModal() {
       try {
-        const response = await fetch('/api/auth/start', { method: 'POST' });
-        const data = await response.json();
-        if (!data.loginUrl) throw new Error('No login URL received');
-        oauthSession = data;
-        container.innerHTML = `
-          <div class="mb-3">
-            <label class="form-label">Step 1: Open Login URL</label>
-            <div class="input-group">
-              <input type="text" class="form-control" id="oauthLoginUrl" value="${escapeHtml(data.loginUrl)}" readonly>
-              <button class="btn btn-outline-action" onclick="copyToClipboard('oauthLoginUrl')">Copy</button>
-              <a class="btn btn-white-bg" href="${escapeHtml(data.loginUrl)}" target="_blank">Open</a>
+        await Promise.all([fetchUmansUserStatus(), fetchUmansConcurrency()]);
+        const kr=await fetch('/api/keys'),kd=await kr.json(); editingIdx=-1; renderKeysList(kd.keys||[]);
+        new bootstrap.Modal(document.getElementById('keysModal')).show();
+      } catch(e) { showToast(t('toast_failed_load_keys','Failed to load keys'),'danger'); }
+    }
+    function copyUserId() {
+      if (umansUserId) {
+        navigator.clipboard.writeText(umansUserId).then(() => showToast(t('toast_user_id_copied','User ID copied'),'success')).catch(() => showToast(t('toast_copy_failed','Copy failed'),'danger'));
+      }
+    }
+    function renderKeysList(keys) {
+      const container = document.getElementById('keysList'), blur = blurTokensEnabled?'token-blurred':'';
+      const real=keys.filter(k=>k.key);
+      const displayUserId = (umansUserId && blurTokensEnabled) ? scrambleUserId(umansUserId) : umansUserId;
+      const userIdRow = umansUserId ? `<div class="mt-1 d-flex align-items-center gap-2" style="font-size:0.7rem;color:rgba(255,255,255,0.55)">
+          <span><i class="bi bi-person-badge me-1"></i>${escapeHtml(t('label_user_id','User ID'))}:</span>
+          <code class="${blur}" style="font-size:0.7rem;color:rgba(255,255,255,0.85);background:rgba(255,255,255,0.05);padding:1px 4px;border-radius:4px;word-break:break-all">${escapeHtml(displayUserId)}</code>
+          <button class="btn btn-sm p-0 ms-auto" style="background:transparent;border:none;color:rgba(255,255,255,0.5);font-size:0.65rem" onclick="copyUserId()" title="${escapeHtml(t('toast_user_id_copied','User ID copied'))}"><i class="bi bi-clipboard"></i></button>
+        </div>` : '';
+      const emailHtml = (umansEmail && blurTokensEnabled) ? formatEmailMasked(umansEmail) : escapeHtml(umansEmail || '');
+      let accountHtml = '';
+      if (umansLoggedIn) {
+        accountHtml = `<div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">${escapeHtml(t('label_account','Account'))}:</div>
+          <div class="mb-2 p-2" style="background:rgba(255,255,255,0.04);border-radius:8px;border:1px solid rgba(255,255,255,0.1);font-size:0.8rem">
+            <div class="d-flex justify-content-between align-items-center">
+              <span style="color:rgba(255,255,255,0.7)"><i class="bi bi-person-circle me-1"></i>${emailHtml}</span>
+              <button class="btn btn-sm" style="background:rgba(220,53,69,0.2);color:#dc3545;border:none;font-size:0.65rem;padding:1px 8px" onclick="if(confirm(escapeHtml(t('logout_confirm','Log out from UMANS account?')))){confirmLogout();}"><i class="bi bi-box-arrow-right me-1"></i>${escapeHtml(t('btn_logout','Logout'))}</button>
             </div>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Step 2: Paste Callback URL</label>
-            <input type="text" class="form-control" id="oauthCallbackUrl" placeholder="Paste the callback URL after login...">
-          </div>
-          <button class="btn btn-white-bg w-100" onclick="verifyOAuth()"><i class="bi bi-check-circle me-2"></i>Verify & Fetch Token</button>
-          <div id="oauthProgress" style="display:none;margin-top:10px;"><div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%"></div></div></div>`;
-        startOAuthPolling();
-      } catch (error) {
-        container.innerHTML = `<div class="text-center text-danger py-3"><i class="bi bi-exclamation-triangle" style="font-size:2rem"></i><p class="mt-2">${error.message}</p><button class="btn btn-sm btn-outline-action" onclick="startOAuth()">Try Again</button></div>`;
+            ${userIdRow}
+          </div>`;
+      } else {
+        accountHtml = `<div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">${escapeHtml(t('label_account','Account'))}:</div>
+          <div class="mb-2 p-2" style="background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.08);font-size:0.8rem">
+            <div class="d-flex justify-content-between align-items-center">
+              <span class="text-muted" style="font-size:0.75rem"><i class="bi bi-person me-1"></i>${escapeHtml(t('status_not_logged_in','Not logged in'))}</span>
+              <button class="btn btn-sm" style="background:rgba(40,167,69,0.2);color:#28a745;border:none;font-size:0.65rem;padding:1px 8px" onclick="bootstrap.Modal.getInstance(document.getElementById('keysModal'))?.hide();setTimeout(openPlatformLoginModal,300)"><i class="bi bi-box-arrow-in-right me-1"></i>${escapeHtml(t('btn_login','Login'))}</button>
+            </div>
+            ${userIdRow}
+          </div>`;
       }
+      let keysHtml = '';
+      if (real.length) {
+        keysHtml = '<div class="mt-2" style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">' + escapeHtml(t('label_keys','Keys')) + ':</div>' +
+        real.map((k,i)=>{
+          const oi = keys.indexOf(k);
+          if(editingIdx===oi) return `<div class="pool-card"><div class="mb-2"><label class="form-label" style="font-size:10px">${escapeHtml(t('label_name','Name'))}</label><input type="text" class="form-control form-control-sm" id="editKeyName" value="${escapeHtml(k.name||'')}"></div><div class="mb-2"><label class="form-label" style="font-size:10px">${escapeHtml(t('label_key','Key'))}</label><input type="text" class="form-control form-control-sm" id="editKey" value="${escapeHtml(k.key||'')}"></div><div class="d-flex gap-2"><button class="btn btn-sm btn-success" onclick="saveEditKey(${oi})"><i class="bi bi-check me-1"></i>${escapeHtml(t('btn_save','Save'))}</button><button class="btn btn-sm btn-secondary" onclick="cancelEditKey()">${escapeHtml(t('btn_cancel','Cancel'))}</button></div></div>`;
+          const mk = k.key.substring(0,4)+'...'+k.key.substring(k.key.length-4);
+          return `<div class="pool-card"><div class="pool-header"><div class="pool-name">${escapeHtml(k.name||t('label_name','Unnamed'))}</div><div><button class="btn btn-sm btn-outline-action me-1" onclick="startEditKey(${oi})" title="${escapeHtml(t('btn_save','Edit'))}"><i class="bi bi-pencil"></i></button><button class="btn btn-sm" style="background:rgba(220,53,69,0.2);color:#dc3545;border:none" onclick="deleteKey(${oi})" title="${escapeHtml(t('btn_delete','Delete'))}"><i class="bi bi-trash"></i></button></div></div><div style="font-size:0.8rem;color:rgba(255,255,255,0.7)"><span class="${blur}" title="${escapeHtml(k.key)}">${mk}</span></div></div>`;
+        }).join('');
+      } else { keysHtml = '<p class="text-muted text-center py-3">' + escapeHtml(t('account_none','No API keys configured.')) + '</p>'; }
+      container.innerHTML = accountHtml + keysHtml;
     }
+    function startEditKey(i) { editingIdx=i; fetch('/api/keys').then(r=>r.json()).then(d=>renderKeysList(d.keys)); }
+    function cancelEditKey() { editingIdx=-1; fetch('/api/keys').then(r=>r.json()).then(d=>renderKeysList(d.keys)); }
+    async function saveEditKey(i) { const n=document.getElementById('editKeyName').value.trim(),k=document.getElementById('editKey').value.trim(); try{const r=await fetch('/api/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'update',index:i,name:n,key:k})});const d=await r.json();if(d.success){editingIdx=-1;showToast(t('toast_key_updated','Key updated'));loadConfig();}else showToast(t('toast_failed_prefix','Failed:') + ' ' + d.error,'danger');}catch{showToast(t('toast_failed_prefix','Failed:'),'danger');} }
+    async function deleteKey(i) { try{const r=await fetch('/api/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete',index:i})});const d=await r.json();if(d.success){showToast(t('toast_key_deleted','Key deleted'));loadConfig();}else showToast(t('toast_failed_prefix','Failed:') + ' ' + d.error,'danger');}catch{showToast(t('toast_failed_prefix','Failed:'),'danger');} }
+    async function addKey() { const n=document.getElementById('newKeyName').value.trim()||(t('label_name','Key') + ' '+(document.querySelectorAll('#keysList .pool-card').length+1)),k=document.getElementById('newKey').value.trim(); if(!k){showToast(t('toast_key_required','Key required'),'warning');return;} try{const r=await fetch('/api/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add',name:n,key:k})});const d=await r.json();if(d.success){document.getElementById('newKeyName').value='';document.getElementById('newKey').value='';showToast(t('toast_key_added','Key added'));loadConfig();}else showToast(t('toast_failed_prefix','Failed:') + ' ' + d.error,'danger');}catch{showToast(t('toast_failed_prefix','Failed:'),'danger');} }
 
-    function startOAuthPolling() {
-      if (oauthPollTimer) clearInterval(oauthPollTimer);
-      let attempts = 0;
-      oauthPollTimer = setInterval(async () => {
-        attempts++;
-        if (attempts > 60) { clearInterval(oauthPollTimer); document.getElementById('oauthProgress').style.display = 'none'; showToast('OAuth timeout', 'warning'); return; }
-        try {
-          const response = await fetch('/api/auth/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fingerprintId: oauthSession.fingerprintId, fingerprintHash: oauthSession.fingerprintHash, expiresAt: oauthSession.expiresAt }) });
-          const data = await response.json();
-          if (data.user && data.user.authToken) {
-            clearInterval(oauthPollTimer);
-            const container = document.getElementById('oauthContainer');
-            container.innerHTML = `<div class="text-center py-3"><div class="badge bg-success mb-3"><i class="bi bi-check-circle me-1"></i>Authenticated</div><p class="text-muted">Token added!</p><p class="fw-medium">${escapeHtml(data.user.email || data.user.name)}</p><button class="btn btn-sm btn-outline-action mt-2" onclick="startOAuth()">Generate Another</button></div>`;
-            showToast('Auth token added successfully', 'success');
-            loadConfiguration();
+    async function loadConfig() {
+      try {
+        const [hr,cr,mr,sr]=await Promise.all([
+          fetch('/healthz'), fetch('/api/config'), fetch('/api/models'),
+          fetch('/api/models/search?per_page=200')
+        ]);
+        proxyData=await hr.json(); const cd=await cr.json(); const md=await mr.json(); const sd=await sr.json();
+        enabledModels = md.models||[];
+        allModels = (sd.data||[]).map(m=>m.id);
+        allDisplayNames = md.model_display_names||{};
+        for (const m of (sd.data||[])) { if (m.id && m.display_name) allDisplayNames[m.id] = m.display_name; }
+        if(cd) {
+          config=cd;
+          if (cd.freegenPrompt) document.getElementById('freegenPromptInput').value = cd.freegenPrompt;
+          if (cd.wallpaperSource && cd.wallpaperSource !== 'none') {
+            await setWallpaper(cd.wallpaperSource);
+          } else {
+            setWallpaperActive('none');
           }
-        } catch (e) {}
-      }, 2000);
-    }
-
-    async function verifyOAuth() {
-      const callbackUrl = document.getElementById('oauthCallbackUrl').value.trim();
-      if (!callbackUrl) { showToast('Please paste the callback URL', 'warning'); return; }
-      document.getElementById('oauthProgress').style.display = 'block';
-      try {
-        const authCode = callbackUrl.includes('auth_code=') ? callbackUrl.split('auth_code=')[1].split('&')[0] : callbackUrl;
-        const response = await fetch('/api/auth/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fingerprintId: oauthSession.fingerprintId, fingerprintHash: oauthSession.fingerprintHash, expiresAt: oauthSession.expiresAt, authCode }) });
-        const data = await response.json();
-        if (data.user && data.user.authToken) {
-          clearInterval(oauthPollTimer);
-          document.getElementById('oauthContainer').innerHTML = `<div class="text-center py-3"><div class="badge bg-success mb-3"><i class="bi bi-check-circle me-1"></i>Authenticated</div><p class="text-muted">Token added!</p><p class="fw-medium">${escapeHtml(data.user.email || data.user.name)}</p><button class="btn btn-sm btn-outline-action mt-2" onclick="startOAuth()">Generate Another</button></div>`;
-          showToast('Auth token added successfully', 'success');
-          loadConfiguration();
-        } else {
-          showToast('Verification pending - waiting for login...', 'info');
         }
-      } catch (error) {
-        document.getElementById('oauthProgress').style.display = 'none';
-        showToast('Verification failed: ' + error.message, 'danger');
+        renderModels(); renderTokenPools(); updateSsModeStatus(); updateStats(); await fetchUsage();
+        setTimeout(initLiquidGlass, 50);
+        setTimeout(()=>window.dispatchEvent(new Event('resize')),500);
+      } catch(e) { showToast(t('toast_failed_load_config','Failed to load configuration'),'danger'); }
+    }
+
+    function renderUsagePage() {
+      const container = document.getElementById('usageHistoryContainer');
+      if (!usageDays.length) {
+        container.innerHTML = '<div class="fw-medium" style="text-align:center;padding:16px;color:rgba(255,255,255,0.3);font-size:12px">' + escapeHtml(t('label_no_data','No usage data yet')) + '</div>';
+        document.getElementById('usagePagination').innerHTML = ''; return;
       }
+      const start = usagePage * usagePerPage;
+      const page = usageDays.slice(start, start + usagePerPage);
+      const totalPages = Math.ceil(usageDays.length / usagePerPage);
+      const hdr = 'font-size:10px;color:rgba(255,255,255,0.6);font-weight:600;';
+const cellR = 'font-weight:600;font-variant-numeric:tabular-nums;color:#fff;';
+container.innerHTML = `<div style="width:100%;font-size:11px;white-space:nowrap"><div style="display:flex;${hdr}border-bottom:1px solid rgba(255,255,255,0.08);padding:4px 0 2px 0"><span style="flex:1 1 0;text-align:left;padding-right:1rem">${escapeHtml(t('header_date','Date'))}</span><span style="flex:1 1 0;text-align:center">${escapeHtml(t('header_requests','Requests'))}</span><span style="flex:1 1 0;text-align:right;display:flex;justify-content:flex-end;gap:0.8rem"><span>${escapeHtml(t('header_tokens','Tokens'))}</span><span style="min-width:3em">${escapeHtml(t('header_cached_pct','Cache%'))}</span></span></div>` +
+        page.map(d => {
+          const tokens = (d.tokens_in||0)+(d.tokens_out||0);
+          const cached = (d.tokens_cached_read||d.tokens_cached||0);
+          const reqs = d.requests||0;
+          const day = (d.bucket||d.timestamp||d.date||d.time||'').substring(0,10);
+          const inputTokens = (d.tokens_in||0) || tokens;
+          const pct = inputTokens > 0 ? ((cached/inputTokens)*100).toFixed(0) + '%' : '';
+          return `<div style="display:flex;padding:2px 0"><span style="flex:1 1 0;text-align:left;color:rgba(255,255,255,0.5);padding-right:1rem">${escapeHtml(day)}</span><span style="flex:1 1 0;text-align:center;${cellR}">${reqs.toLocaleString()}</span><span style="flex:1 1 0;text-align:right;display:flex;justify-content:flex-end;gap:0.8rem;${cellR}"><span>${tokens.toLocaleString()}</span><span style="min-width:3em">${pct}</span></span></div>`;
+        }).join('') + '</div>';
+      document.getElementById('usagePagination').innerHTML =
+        `<button class="btn btn-outline-action btn-sm" onclick="usagePage=Math.max(0,usagePage-1);renderUsagePage()" ${usagePage===0?'disabled':''}><i class="bi bi-chevron-left"></i></button>` +
+        `<span style="font-size:11px;color:rgba(255,255,255,0.6);padding:0 8px">${t('page_n_of_m','{p}/{m}').replace('{p}', usagePage+1).replace('{m}', totalPages)}</span>` +
+        `<button class="btn btn-outline-action btn-sm" onclick="usagePage=Math.min(${totalPages-1},usagePage+1);renderUsagePage()" ${usagePage>=totalPages-1?'disabled':''}><i class="bi bi-chevron-right"></i></button>`;
     }
 
-    function copyToClipboard(elementId) {
-      const el = document.getElementById(elementId);
-      el.select();
-      document.execCommand('copy');
-      showToast('Copied to clipboard', 'info');
-    }
-
-    async function checkHealth(silent = false) {
-      try {
-        const response = await fetch('/healthz');
-        const data = await response.json();
-        if (data.ok) {
-          proxyData = data;
-          document.getElementById('statusIndicator').className = 'status-indicator status-online';
-          document.getElementById('statusText').textContent = 'Online';
-          renderTokenPools();
-          updateStats();
-          if (!silent) showToast('Proxy is healthy', 'success');
+    function estimateWindowFromHistory(buckets, targetReqs) {
+      if (!targetReqs || targetReqs <= 0 || !Array.isArray(buckets) || !buckets.length) return null;
+      const sorted = [...buckets].sort((a, b) => {
+        const da = (a.bucket || a.timestamp || a.date || a.time || '').substring(0, 10);
+        const db = (b.bucket || b.timestamp || b.date || b.time || '').substring(0, 10);
+        return db.localeCompare(da);
+      });
+      let estTokens = 0, estInput = 0, estCached = 0, remaining = targetReqs;
+      let estimated = false;
+      for (const b of sorted) {
+        const dayReqs = b.requests || 0;
+        const dayIn = b.tokens_in || 0;
+        const dayOut = b.tokens_out || 0;
+        const dayCached = b.tokens_cached_read || b.tokens_cached || 0;
+        if (dayReqs <= 0) continue;
+        if (remaining >= dayReqs) {
+          estInput += dayIn;
+          estTokens += dayIn + dayOut;
+          estCached += dayCached;
+          remaining -= dayReqs;
         } else {
-          throw new Error('Unhealthy status');
+          const ratio = remaining / dayReqs;
+          estInput += Math.round(dayIn * ratio);
+          estTokens += Math.round((dayIn + dayOut) * ratio);
+          estCached += Math.round(dayCached * ratio);
+          remaining = 0;
+          estimated = true;
+          break;
         }
-      } catch (error) {
-        document.getElementById('statusIndicator').className = 'status-indicator status-offline';
-        document.getElementById('statusText').textContent = 'Offline';
-        if (!silent) showToast('Proxy health check failed', 'danger');
+        if (remaining <= 0) break;
       }
+      return estimated ? { tokens: estTokens, input: estInput, cached: estCached } : null;
     }
 
-    async function testConnection() {
+    async function fetchUsage() {
       try {
-        const response = await fetch('/v1/models');
-        if (response.ok) {
-          const data = await response.json();
-          showToast(`Connected! ${data.data?.length || 0} models available`, 'success');
-        } else {
-          throw new Error('Connection failed');
+        const [ur,hr]=await Promise.all([fetch('/api/umans/usage'),fetch('/api/umans/usage-history')]);
+        const u=await ur.json(), h=await hr.json();
+        let winTokens=0, winInputTokens=0, winReqs=0, cached=0, histTokens=0, histInputTokens=0, histReqs=0, histCached=0;
+        let usageBuckets = [];
+        const winSrc = (u.window && (u.window.tokens_in !== undefined || u.window.tokens_out !== undefined || u.window.requests_in_window !== undefined)) ? u.window : u.usage;
+        if (winSrc) {
+          winReqs = winSrc.requests_in_window||0;
+          winInputTokens = winSrc.tokens_in||0;
+          winTokens = winInputTokens+(winSrc.tokens_out||0);
+          cached = winSrc.tokens_cached||u.usage?.tokens_cached||0;
         }
-      } catch (error) {
-        showToast('Connection test failed', 'danger');
-      }
-    }
-
-    function refreshModels() {
-      loadConfiguration();
-      showToast('Models refreshed', 'info');
-    }
-
-    function updateRemainingDisplay() {
-      const el = document.getElementById('tokenRemainingTime');
-      if (!remainingMsAtFetch || !remainingMsTimestamp) { el.textContent = ''; return; }
-      const elapsed = Date.now() - remainingMsTimestamp;
-      const left = Math.max(0, remainingMsAtFetch - elapsed);
-      if (left <= 0) { el.textContent = 'expired'; return; }
-      const totalSec = Math.floor(left / 1000);
-      const hrs = Math.floor(totalSec / 3600);
-      const mins = Math.floor((totalSec % 3600) / 60);
-      const secs = totalSec % 60;
-      el.textContent = (hrs > 0 ? hrs + 'h ' : '') + mins + 'm ' + secs + 's left';
+        if(h.history) {
+          const buckets=h.history.buckets||h.history.entries||h.history.data||[];
+          if(Array.isArray(buckets)){usageDays=buckets;usageBuckets=buckets;for(const b of buckets){histTokens+=(b.tokens_in||0)+(b.tokens_out||0);histInputTokens+=(b.tokens_in||0);histCached+=(b.tokens_cached_read||b.tokens_cached||0);histReqs+=b.requests||0;}}
+        }
+        const bugDetected = (winReqs > 0 && winReqs < histReqs && histTokens > 0 && winTokens >= histTokens);
+        const labelEl = document.getElementById('totalTokensLabel');
+        if (bugDetected) {
+          const est = estimateWindowFromHistory(usageBuckets, winReqs);
+          if (est) {
+            winTokens = est.tokens;
+            winInputTokens = est.input;
+            cached = est.cached;
+            if (labelEl) labelEl.textContent = t('label_tokens_est','Tokens (est.)');
+            if (labelEl) labelEl.title = 'Original UMANS window token value equaled the 90-day total. This number is estimated from the per-day history rows.';
+          }
+        } else if (labelEl) {
+          labelEl.textContent = t('label_tokens','Tokens');
+          labelEl.title = '';
+        }
+        usagePage = 0;
+        const cachedPct = winInputTokens > 0 ? ((cached/winInputTokens)*100).toFixed(1) : '0.0';
+        document.getElementById('totalRequests').textContent = winReqs.toLocaleString();
+        document.getElementById('totalTokens').textContent = winTokens.toLocaleString();
+        document.getElementById('cachedPct').textContent = cachedPct + '%';
+        const histCachedPct = histInputTokens > 0 ? ((histCached/histInputTokens)*100).toFixed(0) : 0;
+        document.getElementById('histTotalTokens').textContent = histTokens.toLocaleString();
+        document.getElementById('histCachedPct').textContent = `(${histCachedPct}% cached)`;
+        document.getElementById('histTotalReqs').textContent = histReqs.toLocaleString();
+        renderUsagePage();
+      } catch { document.getElementById('totalTokens').textContent='--';document.getElementById('totalRequests').textContent='--';document.getElementById('cachedPct').textContent='--'; }
     }
 
     function updateStats() {
-      if (!proxyData || !proxyData.token_state) return;
-      document.getElementById('totalModels').textContent = models.length;
-      document.getElementById('startedAt').textContent = new Date(proxyData.started_at).toLocaleString();
-      document.getElementById('tokenCountBadge').textContent = proxyData.token_state.length;
-      if (!countryCodeSet) {
-        const bestToken = proxyData.token_state.find(t => t.country_code) || proxyData.token_state[0];
-        const cc = bestToken?.country_code || '-';
-        const tier = bestToken?.access_tier || '';
-        const el = document.getElementById('countryCode');
-        el.textContent = cc;
-        if (proxyData.opera_proxy && proxyData.opera_proxy.exit_country) {
-          const small = document.createElement('small');
-          small.textContent = '>' + proxyData.opera_proxy.exit_country;
-          small.style.marginLeft = '4px';
-          small.style.opacity = '0.7';
-          el.appendChild(small);
-        } else if (tier === 'limited') {
-          const small = document.createElement('small');
-          small.textContent = '(limit)';
-          small.style.marginLeft = '4px';
-          small.style.opacity = '0.7';
-          el.appendChild(small);
-        }
-        if (cc !== '-') countryCodeSet = true;
-      }
-      const activeToken = proxyData.token_state.find(t => t.remaining_ms && t.remaining_ms > 0);
-      if (activeToken) {
-        remainingMsAtFetch = activeToken.remaining_ms;
-        remainingMsTimestamp = Date.now();
-      } else {
-        remainingMsAtFetch = 0;
-        remainingMsTimestamp = 0;
-      }
-      updateRemainingDisplay();
-      updateRemainingDisplay();
-      if (proxyData.runtime) {
-        document.getElementById('runtimeInfo').textContent = proxyData.runtime + ' v' + proxyData.runtime_version;
-      }
-      if (proxyData.opera_proxy) {
-        const el = document.getElementById('operaProxyStatus');
-        if (!proxyData.opera_proxy.enabled) {
-          el.textContent = 'Disabled';
-          el.style.color = '#888';
-        } else if (proxyData.opera_proxy.running) {
-          el.textContent = 'Running';
-          el.style.color = '#4caf50';
+      if(!proxyData) return;
+      document.getElementById('runtimeInfo').textContent = (proxyData.runtime||'node')+' v'+(proxyData.runtime_version||'');
+      document.getElementById('portInfo').textContent = proxyData.port||'8084';
+      const started = proxyData.started_at ? new Date(proxyData.started_at).toLocaleString() : '-';
+      document.getElementById('startedAt').textContent = started;
+    }
+
+    async function checkHealth() {
+      try{const r=await fetch('/healthz');const d=await r.json();if(d.ok){proxyData=d;document.getElementById('statusIndicator').className='status-indicator status-online';document.getElementById('statusText').textContent=t('status_online','Online');renderTokenPools();updateStats();showToast(t('toast_health_ok','Health OK'));}else throw Error();}catch{document.getElementById('statusIndicator').className='status-indicator status-offline';document.getElementById('statusText').textContent=t('status_offline','Offline');showToast(t('toast_health_failed','Health check failed'),'danger');}
+    }
+    async function testConnection() {
+      try{const r=await fetch('/v1/models');if(r.ok){const d=await r.json();showToast(t('toast_connected','Connected! {n} models').replace('{n}', d.data?.length||0));}else throw Error();}catch{showToast(t('toast_connection_failed','Connection test failed'),'danger');}
+    }
+    function updateStatus() {
+      fetch('/healthz').then(r=>r.json()).then(d=>{proxyData=d;document.getElementById('statusIndicator').className=d.ok?'status-indicator status-online':'status-indicator status-offline';document.getElementById('statusText').textContent=d.ok?t('status_online','Online'):t('status_offline','Offline');renderTokenPools();updateStats();}).catch(()=>{document.getElementById('statusIndicator').className='status-indicator status-offline';document.getElementById('statusText').textContent=t('status_offline','Offline');});
+    }
+
+    function restartProxy() {
+      if (!confirm(t('restart_confirm','Restart the proxy?'))) return;
+      const btn = document.getElementById('restartBtn');
+      btn.disabled = true; btn.innerHTML = '<i class="bi bi-arrow-counterclockwise me-2"></i>' + t('restart_waiting','Restarting...');
+      document.getElementById('statusIndicator').className = 'status-indicator status-reconnecting';
+      document.getElementById('statusText').textContent = t('status_reconnecting','Reconnecting...');
+      fetch('/api/restart', { method: 'POST' }).then(r => r.json()).then(d => showToast(d.message || t('restart_waiting','Restarting...'))).catch(() => {});
+      let attempts = 0;
+      const iv = setInterval(() => {
+        attempts++;
+        fetch('/healthz').then(r => r.json()).then(d => {
+          if (d.ok) {
+            document.getElementById('statusIndicator').className = 'status-indicator status-online';
+            document.getElementById('statusText').textContent = t('status_online','Online');
+            btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-counterclockwise me-2"></i>' + t('btn_restart_proxy','Restart Proxy');
+            showToast(t('restart_back_online','Proxy is back online!'), 'success'); clearInterval(iv);
+          }
+        }).catch(() => {
+          if (attempts >= 30) {
+            document.getElementById('statusIndicator').className = 'status-indicator status-offline';
+            document.getElementById('statusText').textContent = t('status_offline','Offline');
+            btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-counterclockwise me-2"></i>' + t('btn_restart_proxy','Restart Proxy');
+            showToast(t('restart_timeout','Proxy did not come back'), 'danger'); clearInterval(iv);
+          }
+        });
+      }, 2000);
+    }
+
+    function openPlatformLoginModal() {
+      document.getElementById('platLoginUsername').value = '';
+      document.getElementById('platLoginPassword').value = '';
+      document.getElementById('platLoginStatus').style.display = 'none';
+      new bootstrap.Modal(document.getElementById('platformLoginModal')).show();
+    }
+    async function savePlatformLogin() {
+      const email = document.getElementById('platLoginUsername').value.trim();
+      const password = document.getElementById('platLoginPassword').value;
+      if (!email || !password) { showToast(t('toast_key_required','Email and password required'), 'warning'); return; }
+      const statusEl = document.getElementById('platLoginStatus');
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = '<span class="text-info">' + escapeHtml(t('login_logging_in','Logging in...')) + '</span>';
+      try {
+        const r = await fetch('/api/umans/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email,password}) });
+        const d = await r.json();
+        if (d.success) {
+          umansLoggedIn = true; umansEmail = d.email || email;
+          statusEl.innerHTML = `<span class="text-success">${escapeHtml(t('login_logged_in','Logged in as {email}').replace('{email}', d.email))}</span>`;
+          setTimeout(() => { bootstrap.Modal.getInstance(document.getElementById('platformLoginModal'))?.hide(); fetchUsage(); }, 800);
+          showToast(t('toast_login_success','Login successful'), 'success');
         } else {
-          el.textContent = 'Ready';
-          el.style.color = '#ff9800';
+          statusEl.innerHTML = `<span class="text-danger">${escapeHtml(t('login_failed','Login failed: {error}').replace('{error}', d.error||'Unknown error'))}</span>`;
         }
+      } catch(e) { statusEl.innerHTML = `<span class="text-danger">${escapeHtml(t('login_error','Error: {error}').replace('{error}', e.message))}</span>`; }
+    }
+    async function confirmLogout() {
+      try {
+        await fetch('/api/umans/logout', { method:'POST' });
+        umansLoggedIn = false; umansEmail = ''; umansUserId = '';
+        bootstrap.Modal.getInstance(document.getElementById('logoutConfirmModal'))?.hide();
+        const kr=await fetch('/api/keys'), kd=await kr.json();
+        renderKeysList(kd.keys||[]);
+        showToast(t('toast_logout_success','Logged out'), 'info');
+        fetchUsage();
+      } catch { showToast(t('toast_logout_failed','Logout failed'), 'danger'); }
+    }
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && document.getElementById('platformLoginModal')?.classList.contains('show')) {
+        e.preventDefault(); savePlatformLogin();
+      }
+    });
+
+    // --- Test Chat ---
+    let testChatBusy = false;
+    let testChatHistory = [];
+    let testChatAbort = null;
+    let testChatReader = null;
+
+    function setTestChatVisible(show) {
+      const card = document.getElementById('testChatCard');
+      if (card) card.classList.toggle('visible', show);
+    }
+
+    function setTestChatBusy(busy) {
+      testChatBusy = busy;
+      const sendBtn = document.getElementById('testChatSendBtn');
+      if (sendBtn) sendBtn.disabled = busy;
+    }
+
+    function stripUmans(s) { return s.replace(/^umans-/i, ''); }
+    function getModelDisplayName(modelId) {
+      return stripUmans(allDisplayNames[modelId] || modelId.split('/').pop());
+    }
+
+    function updateTestChatModels() {
+      const sel = document.getElementById('testChatModelSelect');
+      const current = sel.value;
+      sel.innerHTML = '';
+      const all = allModels || [];
+      const enabled = new Set(enabledModels || []);
+      if (!all.length) {
+        sel.innerHTML = '<option value="">' + escapeHtml(t('models_loading','Loading models...')) + '</option>';
+        return;
+      }
+      all.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m;
+        const dn = getModelDisplayName(m);
+        const shortId = stripUmans(m.split('/').pop());
+        const suffix = enabled.has(m) ? '' : ' [disabled]';
+        opt.textContent = dn + ' (' + shortId + ')' + suffix;
+        opt.style.color = enabled.has(m) ? 'white' : 'rgba(255,255,255,0.4)';
+        sel.appendChild(opt);
+      });
+      if (current && all.includes(current)) sel.value = current;
+      else sel.value = all[0];
+    }
+
+    async function sendTestChat() {
+      if (testChatBusy) return;
+      const input = document.getElementById('testChatInput');
+      const msg = input.value.trim();
+      if (!msg) return;
+      const model = document.getElementById('testChatModelSelect').value;
+      if (!model) { showToast(t('toast_key_required','No model selected'), 'warning'); return; }
+
+      input.value = '';
+      setTestChatBusy(true);
+      const pairs = document.getElementById('testChatPairs');
+      const emptyEl = document.getElementById('testChatEmpty');
+      if (emptyEl) emptyEl.style.display = 'none';
+
+      const startTime = performance.now();
+      const streamOn = document.getElementById('testChatStreamToggle').checked;
+      const ctxOn = document.getElementById('testChatContextToggle').checked;
+
+      const userDiv = document.createElement('div');
+      userDiv.className = 'test-chat-msg user';
+      userDiv.innerHTML = `<div class="test-chat-msg-role"><span>${escapeHtml(t('test_chat_role_you','You'))}</span><span class="test-chat-msg-time">${new Date().toLocaleTimeString()}</span></div><div class="test-chat-msg-content">${escapeHtml(msg)}</div>`;
+      pairs.appendChild(userDiv);
+
+      const thinkDiv = document.createElement('div');
+      thinkDiv.className = 'test-chat-msg assistant';
+      thinkDiv.id = 'testChatThinking';
+      const thinkingText = t('test_chat_typing_indicator','{model} is typing...').replace('{model}', escapeHtml(getModelDisplayName(model)));
+      thinkDiv.innerHTML = '<div class="test-chat-thinking"><span>' + thinkingText + '</span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>';
+      pairs.appendChild(thinkDiv);
+      const scroll = document.getElementById('testChatScroll');
+      scroll.scrollTop = scroll.scrollHeight;
+
+      const body = {
+        model,
+        messages: ctxOn ? [...testChatHistory, { role: 'user', content: msg }] : [{ role: 'user', content: msg }],
+        stream: streamOn,
+      };
+
+      testChatAbort = new AbortController();
+      try {
+        const resp = await fetch('/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-umans-proxy-skip-label': '1' },
+          body: JSON.stringify(body),
+          signal: testChatAbort.signal,
+        });
+
+        if (streamOn && resp.ok && resp.body) {
+          const reader = resp.body.getReader();
+          testChatReader = reader;
+          const decoder = new TextDecoder();
+          const thinkEl = document.getElementById('testChatThinking');
+          if (thinkEl) thinkEl.remove();
+
+          const dn = getModelDisplayName(model);
+          const asstDiv = document.createElement('div');
+          asstDiv.className = 'test-chat-msg assistant';
+          asstDiv.innerHTML = `<div class="test-chat-msg-role"><span>${escapeHtml(dn)}</span><span class="test-chat-msg-time"></span></div><div class="test-chat-msg-content"></div>`;
+          pairs.appendChild(asstDiv);
+          scroll.scrollTop = scroll.scrollHeight;
+
+          let fullContent = '';
+          let thinkTagOpen = false;
+          let buffer = '';
+
+          while (true) {
+            let done, value;
+            try {
+              ({ done, value } = await reader.read());
+            } catch (readErr) {
+              if (readErr.name === 'AbortError') break;
+              throw readErr;
+            }
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6).trim();
+                if (data === '[DONE]') continue;
+                try {
+                  const parsed = JSON.parse(data);
+                  const delta = parsed.choices?.[0]?.delta?.content || '';
+                  if (!delta) continue;
+                  for (const ch of delta) {
+                    if (ch === '<' && !thinkTagOpen) { thinkTagOpen = true; continue; }
+                    if (thinkTagOpen) { if (ch === '>') thinkTagOpen = false; continue; }
+                    fullContent += ch;
+                    asstDiv.querySelector('.test-chat-msg-content').textContent = fullContent;
+                    scroll.scrollTop = scroll.scrollHeight;
+                    await new Promise(r => setTimeout(r, 5));
+                  }
+                } catch {}
+              }
+            }
+          }
+
+          fullContent = fullContent.replace(/^\s+|\s+$/g, '') || '(empty response)';
+          asstDiv.querySelector('.test-chat-msg-content').textContent = fullContent;
+          const elapsed = Math.round(performance.now() - startTime);
+          asstDiv.querySelector('.test-chat-msg-time').innerHTML = `${new Date().toLocaleTimeString()} (<span class="test-chat-ms">${elapsed}ms</span>)`;
+          testChatHistory.push({ role: 'user', content: msg.trim() });
+          testChatHistory.push({ role: 'assistant', content: fullContent });
+          if (testChatHistory.length > 20) testChatHistory.splice(0, 2);
+        } else {
+          const elapsed = Math.round(performance.now() - startTime);
+          const thinkEl = document.getElementById('testChatThinking');
+          if (thinkEl) thinkEl.remove();
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            const errMsg = errData.error?.message || `HTTP ${resp.status}`;
+            const errDiv = document.createElement('div');
+            errDiv.className = 'test-chat-msg assistant error';
+            errDiv.innerHTML = `<div class="test-chat-msg-role"><span>${escapeHtml(t('test_chat_role_error','Error'))}</span><span class="test-chat-msg-time">${new Date().toLocaleTimeString()} (<span class="test-chat-ms">${elapsed}ms</span>)</span></div><div class="test-chat-msg-content">${escapeHtml(errMsg)}</div>`;
+            pairs.appendChild(errDiv);
+          } else {
+            const data = await resp.json();
+            const msgData = data.choices?.[0]?.message || {};
+            let content = (msgData.content || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^\s+|\s+$/g, '') || '(empty response)';
+            const dn = getModelDisplayName(model);
+            const asstDiv = document.createElement('div');
+            asstDiv.className = 'test-chat-msg assistant';
+            asstDiv.innerHTML = `<div class="test-chat-msg-role"><span>${escapeHtml(dn)}</span><span class="test-chat-msg-time">${new Date().toLocaleTimeString()} (<span class="test-chat-ms">${elapsed}ms</span>)</span></div><div class="test-chat-msg-content">${escapeHtml(content)}</div>`;
+            pairs.appendChild(asstDiv);
+            testChatHistory.push({ role: 'user', content: msg.trim() });
+            testChatHistory.push({ role: 'assistant', content });
+            if (testChatHistory.length > 20) testChatHistory.splice(0, 2);
+          }
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') {
+          const thinkEl = document.getElementById('testChatThinking');
+          if (thinkEl) thinkEl.remove();
+        } else {
+          const elapsed = Math.round(performance.now() - startTime);
+          const thinkEl = document.getElementById('testChatThinking');
+          if (thinkEl) thinkEl.remove();
+          const errDiv = document.createElement('div');
+          errDiv.className = 'test-chat-msg assistant error';
+          errDiv.innerHTML = `<div class="test-chat-msg-role"><span>${escapeHtml(t('test_chat_role_error','Error'))}</span><span class="test-chat-msg-time">${new Date().toLocaleTimeString()} (${elapsed}ms)</span></div><div class="test-chat-msg-content">${escapeHtml(e.message)}</div>`;
+          pairs.appendChild(errDiv);
+        }
+      } finally {
+        testChatReader = null;
+        testChatAbort = null;
+        setTestChatBusy(false);
+        scroll.scrollTop = scroll.scrollHeight;
       }
     }
 
-    function toggleSection(name) {
-      const body = document.getElementById('section-' + name);
-      const card = body.closest('[data-section]');
-      const icon = card.querySelector('.toggle-icon');
-      body.classList.toggle('collapsed');
-      icon.classList.toggle('collapsed');
-      setTimeout(() => initLiquidGlass(), 50);
+    function onModelChange() {
+      if (testChatAbort) {
+        try { testChatReader?.cancel(); } catch {}
+        try { testChatAbort.abort(); } catch {}
+      }
+      clearTestChat();
     }
 
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
+    function clearTestChat() {
+      testChatHistory = [];
+      const pairs = document.getElementById('testChatPairs');
+      if (pairs) pairs.innerHTML = '';
+      const emptyEl = document.getElementById('testChatEmpty');
+      if (emptyEl) {
+        emptyEl.style.display = '';
+      } else {
+        const inner = document.createElement('div');
+        inner.className = 'test-chat-empty';
+        inner.id = 'testChatEmpty';
+        inner.textContent = t('test_chat_empty','Select a model and ask anything to test.');
+        pairs.appendChild(inner);
+      }
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
-      initLiquidGlass();
-      try { const cached = localStorage.getItem('adsEnabled'); if (cached === 'false') { adsEnabled = false; const t = document.getElementById('adsToggleEnv'); if (t) t.checked = false; } } catch (e) {}
-      loadConfiguration().then(() => { fetchBingWallpaper(); if (adsEnabled) fetchAds().then(() => { renderAdInTokenCard(); setTimeout(() => initLiquidGlass(), 100); }); else { renderAdInTokenCard(); setTimeout(() => initLiquidGlass(), 100); } });
-      checkHealth();
-      setInterval(() => checkHealth(true), 5000);
-      setInterval(() => rotateAd(), 30000);
-      setInterval(() => updateRemainingDisplay(), 1000);
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && document.activeElement === document.getElementById('testChatInput')) {
+        e.preventDefault();
+        sendTestChat();
+      }
     });
+
+    let resizeTimer;
+    window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(initLiquidGlass, 150); });
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      bindTranslateCancel();
+      hideDashboardUntilWallpaper();
+      const cfg = await fetchI18nConfig();
+      _hasApiKey = !!cfg.has_key;
+      const forcedLocale = cfg.forced_locale || null;
+      const cb = document.getElementById('autotranslateCheckbox');
+      if (!_hasApiKey || !cb) {
+        window.__i18n = {}; // English fallback
+      } else if (forcedLocale && forcedLocale !== 'en') {
+        cb.checked = true;
+        cb.disabled = true;
+        const label = cb.closest('label');
+        if (label && !label.querySelector('.forced-hint')) {
+          const hint = document.createElement('span');
+          hint.className = 'forced-hint';
+          hint.style.cssText = 'margin-left:6px;font-size:10px;color:rgba(255,255,255,0.55);text-transform:uppercase;letter-spacing:0.4px';
+          hint.textContent = t('forced_locale_hint','(forced: {locale})').replace('{locale}', forcedLocale);
+          label.appendChild(hint);
+        }
+        cb.addEventListener('click', function(e) { e.preventDefault(); });
+        setTimeout(() => enableAutotranslate(forcedLocale), 50);
+      } else {
+        const nav = detectDashboardLocale();
+        const stored = localStorage.getItem('preferredLocale');
+        if (stored) cb.checked = true;
+        cb.addEventListener('change', function() {
+          if (cb.checked) enableAutotranslate();
+          else disableAutotranslate();
+        });
+        if (stored) setTimeout(() => enableAutotranslate(), 50);
+      }
+      loadConfig().then(() => {
+        wallpaperLoaded = true;
+        const loader = document.getElementById('wallpaperLoader');
+        if (loader) loader.style.display = 'none';
+      });
+      updateStatus();
+      setInterval(updateStatus,15000);
+      setInterval(fetchUsage,30000);
+      setTimeout(()=>window.dispatchEvent(new Event('resize')),1000);
+      setTimeout(()=>window.dispatchEvent(new Event('resize')),3000);
+    });
+    function hideDashboardUntilWallpaper() {
+      if (document.getElementById('wallpaperLoader')) return;
+      const loader = document.createElement('div');
+      loader.id = 'wallpaperLoader';
+      loader.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0d1117;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;color:rgba(255,255,255,0.8);transition:opacity 0.4s ease';
+      loader.innerHTML = '<div class=\"spinner-border text-light\" role=\"status\"></div><div style=\"font-size:14px;letter-spacing:0.5px\">Loading dashboard...</div>';
+      document.body.appendChild(loader);
+    }
   </script>
 </body>
 </html>
