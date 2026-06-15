@@ -3,8 +3,17 @@ setlocal enabledelayedexpansion
 
 cd /d "%~dp0"
 
+:: Detect port from config (same logic as UMANS-PROXY)
+set "PORT=8080"
+set "CONFIG_FILE=%~dp0.config\config.json"
+if exist "%CONFIG_FILE%" (
+    for /f "usebackq delims=" %%a in (`powershell -NoProfile -Command "$c=Get-Content '%CONFIG_FILE%' -Raw | ConvertFrom-Json; $l=$c.LISTEN_ADDR; if($l -match ':(?<p>\d+)$'){Write-Output $matches['p']}else{Write-Output '8080'}"`) do set "PORT=%%a"
+)
+
+title FREEBUFFProxy
+
 echo ==================================================
-echo  Freebuff2Opencode Proxy
+echo  Freebuff2Opencode Proxy — http://localhost:%PORT%
 echo ==================================================
 echo.
 
@@ -66,7 +75,8 @@ if defined BUN_PATH (
 )
 
 echo [1/4] Cleaning up...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8080.*LISTENING"') do (
+:: Kill only whatever is currently listening on the configured port.
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%PORT% " ^| findstr "LISTENING"') do (
     taskkill /PID %%a /F >nul 2>&1
 )
 timeout /t 1 /nobreak >nul
@@ -108,8 +118,8 @@ if exist "package-lock.json" del /F /Q "package-lock.json" >nul 2>&1
 echo [4/4] Starting proxy...
 echo.
 echo ==================================================
-echo  Proxy: http://127.0.0.1:8080
-echo  Dashboard: http://127.0.0.1:8080/dashboard
+echo  Proxy: http://127.0.0.1:%PORT%
+echo  Dashboard: http://127.0.0.1:%PORT%/dashboard
 echo ==================================================
 echo.
 
@@ -128,7 +138,7 @@ echo [ERROR] Proxy exited with code %EXIT_CODE%
 :done
 if not defined OPENCODE_ATTACH (
     echo.
-    echo Press any key to close...
-    timeout /t 10 >nul
+    echo Proxy stopped.
+    timeout /t 5 /nobreak >nul
 )
 exit

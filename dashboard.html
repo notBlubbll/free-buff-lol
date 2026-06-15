@@ -553,148 +553,57 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
   <script>
-    const SURFACE_FNS = {
-      convex_squircle: (x) => Math.pow(1 - Math.pow(1 - x, 4), 0.25),
-    };
-
-    function calculateRefractionProfile(glassThickness, bezelWidth, heightFn, ior, samples) {
-      samples = samples || 128;
-      const eta = 1 / ior;
-      function refract(nx, ny) {
-        const dot = ny;
-        const k = 1 - eta * eta * (1 - dot * dot);
-        if (k < 0) return null;
-        const sq = Math.sqrt(k);
-        return [-(eta * dot + sq) * nx, eta - (eta * dot + sq) * ny];
-      }
-      const profile = new Float64Array(samples);
-      for (let i = 0; i < samples; i++) {
-        const x = i / samples;
-        const y = heightFn(x);
-        const dx = x < 1 ? 0.0001 : -0.0001;
-        const y2 = heightFn(x + dx);
-        const deriv = (y2 - y) / dx;
-        const mag = Math.sqrt(deriv * deriv + 1);
-        const ref = refract(-deriv / mag, -1 / mag);
-        if (!ref) { profile[i] = 0; continue; }
-        profile[i] = ref[0] * ((y * bezelWidth + glassThickness) / ref[1]);
-      }
-      return profile;
+    const SURFACE_FNS = { convex_squircle: (x) => Math.pow(1 - Math.pow(1 - x, 4), 0.25) };
+    function calcRefractionProfile(t, b, hf, ior, s) {
+      s = s || 128; const eta = 1 / ior; const p = new Float64Array(s);
+      function refr(nx, ny) { const d = ny, k = 1 - eta * eta * (1 - d * d); if (k < 0) return null; const sq = Math.sqrt(k); return [-(eta * d + sq) * nx, eta - (eta * d + sq) * ny]; }
+      for (let i = 0; i < s; i++) { const x = i / s, y = hf(x), dx = x < 1 ? .0001 : -.0001, y2 = hf(x + dx), deriv = (y2 - y) / dx, mag = Math.sqrt(deriv * deriv + 1), ref = refr(-deriv / mag, -1 / mag); if (!ref) { p[i] = 0; continue; } p[i] = ref[0] * ((y * b + t) / ref[1]); }
+      return p;
     }
-
-    function generateDisplacementMap(w, h, radius, bezelWidth, profile, maxDisp) {
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      const ctx = c.getContext('2d');
-      const img = ctx.createImageData(w, h);
-      const d = img.data;
-      for (let i = 0; i < d.length; i += 4) { d[i] = 128; d[i+1] = 128; d[i+2] = 0; d[i+3] = 255; }
-      const r = radius, rSq = r*r, r1Sq = (r+1)**2;
-      const rBSq = Math.max(r - bezelWidth, 0)**2;
-      const wB = w - r*2, hB = h - r*2, S = profile.length;
-      for (let y1 = 0; y1 < h; y1++) {
-        for (let x1 = 0; x1 < w; x1++) {
-          const x = x1 < r ? x1 - r : x1 >= w - r ? x1 - r - wB : 0;
-          const y = y1 < r ? y1 - r : y1 >= h - r ? y1 - r - hB : 0;
-          const dSq = x*x + y*y;
-          if (dSq > r1Sq || dSq < rBSq) continue;
-          const dist = Math.sqrt(dSq);
-          const fromSide = r - dist;
-          const op = dSq < rSq ? 1 : 1 - (dist - Math.sqrt(rSq)) / (Math.sqrt(r1Sq) - Math.sqrt(rSq));
-          if (op <= 0 || dist === 0) continue;
-          const cos = x / dist, sin = y / dist;
-          const bi = Math.min(((fromSide / bezelWidth) * S) | 0, S - 1);
-          const disp = profile[bi] || 0;
-          const dX = (-cos * disp) / maxDisp, dY = (-sin * disp) / maxDisp;
-          const idx = (y1 * w + x1) * 4;
-          d[idx] = (128 + dX * 127 * op + 0.5) | 0;
-          d[idx+1] = (128 + dY * 127 * op + 0.5) | 0;
-        }
-      }
-      ctx.putImageData(img, 0, 0);
-      return c.toDataURL();
+    function genDispMap(w, h, r, bw, prof, maxD) {
+      const c = document.createElement('canvas'); c.width = w; c.height = h; const ctx = c.getContext('2d'), img = ctx.createImageData(w, h), d = img.data;
+      for (let i = 0; i < d.length; i += 4) { d[i] = 128; d[i + 1] = 128; d[i + 2] = 0; d[i + 3] = 255; }
+      const rSq = r * r, r1Sq = (r + 1) ** 2, rBSq = Math.max(r - bw, 0) ** 2, wB = w - r * 2, hB = h - r * 2, S = prof.length;
+      for (let y1 = 0; y1 < h; y1++) for (let x1 = 0; x1 < w; x1++) { const x = x1 < r ? x1 - r : x1 >= w - r ? x1 - r - wB : 0, y = y1 < r ? y1 - r : y1 >= h - r ? y1 - r - hB : 0, dSq = x * x + y * y; if (dSq > r1Sq || dSq < rBSq) continue; const dist = Math.sqrt(dSq), fromSide = r - dist, op = dSq < rSq ? 1 : 1 - (dist - Math.sqrt(rSq)) / (Math.sqrt(r1Sq) - Math.sqrt(rSq)); if (op <= 0 || dist === 0) continue; const cos = x / dist, sin = y / dist, bi = Math.min(((fromSide / bw) * S) | 0, S - 1), disp = prof[bi] || 0, dX = (-cos * disp) / maxD, dY = (-sin * disp) / maxD, idx = (y1 * w + x1) * 4; d[idx] = (128 + dX * 127 * op + .5) | 0; d[idx + 1] = (128 + dY * 127 * op + .5) | 0; }
+      ctx.putImageData(img, 0, 0); return c.toDataURL();
     }
-
-    function generateSpecularMap(w, h, radius, bezelWidth, angle) {
-      angle = angle != null ? angle : Math.PI / 3;
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      const ctx = c.getContext('2d');
-      const img = ctx.createImageData(w, h);
-      const d = img.data; d.fill(0);
-      const r = radius, rSq = r*r, r1Sq = (r+1)**2;
-      const rBSq = Math.max(r - bezelWidth, 0)**2;
-      const wB = w - r*2, hB = h - r*2;
-      const sv = [Math.cos(angle), Math.sin(angle)];
-      for (let y1 = 0; y1 < h; y1++) {
-        for (let x1 = 0; x1 < w; x1++) {
-          const x = x1 < r ? x1 - r : x1 >= w - r ? x1 - r - wB : 0;
-          const y = y1 < r ? y1 - r : y1 >= h - r ? y1 - r - hB : 0;
-          const dSq = x*x + y*y;
-          if (dSq > r1Sq || dSq < rBSq) continue;
-          const dist = Math.sqrt(dSq);
-          const fromSide = r - dist;
-          const op = dSq < rSq ? 1 : 1 - (dist - Math.sqrt(rSq)) / (Math.sqrt(r1Sq) - Math.sqrt(rSq));
-          if (op <= 0 || dist === 0) continue;
-          const cos = x / dist, sin = -y / dist;
-          const dot = Math.abs(cos * sv[0] + sin * sv[1]);
-          const edge = Math.sqrt(Math.max(0, 1 - (1 - fromSide)**2));
-          const coeff = dot * edge;
-          const col = (255 * coeff) | 0;
-          const alpha = (col * coeff * op) | 0;
-          const idx = (y1 * w + x1) * 4;
-          d[idx] = col; d[idx+1] = col; d[idx+2] = col; d[idx+3] = alpha;
-        }
-      }
-      ctx.putImageData(img, 0, 0);
-      return c.toDataURL();
+    function genSpecMap(w, h, r, bw, angle) {
+      angle = angle != null ? angle : Math.PI / 3; const c = document.createElement('canvas'); c.width = w; c.height = h; const ctx = c.getContext('2d'), img = ctx.createImageData(w, h), d = img.data; d.fill(0);
+      const rSq = r * r, r1Sq = (r + 1) ** 2, rBSq = Math.max(r - bw, 0) ** 2, wB = w - r * 2, hB = h - r * 2, sv = [Math.cos(angle), Math.sin(angle)];
+      for (let y1 = 0; y1 < h; y1++) for (let x1 = 0; x1 < w; x1++) { const x = x1 < r ? x1 - r : x1 >= w - r ? x1 - r - wB : 0, y = y1 < r ? y1 - r : y1 >= h - r ? y1 - r - hB : 0, dSq = x * x + y * y; if (dSq > r1Sq || dSq < rBSq) continue; const dist = Math.sqrt(dSq), fromSide = r - dist, op = dSq < rSq ? 1 : 1 - (dist - Math.sqrt(rSq)) / (Math.sqrt(r1Sq) - Math.sqrt(rSq)); if (op <= 0 || dist === 0) continue; const cos = x / dist, sin = -y / dist, dot = Math.abs(cos * sv[0] + sin * sv[1]), edge = Math.sqrt(Math.max(0, 1 - (1 - fromSide) ** 2)), coeff = dot * edge, col = (255 * coeff) | 0, alpha = (col * coeff * op) | 0, idx = (y1 * w + x1) * 4; d[idx] = col; d[idx + 1] = col; d[idx + 2] = col; d[idx + 3] = alpha; }
+      ctx.putImageData(img, 0, 0); return c.toDataURL();
     }
 
     function initLiquidGlass() {
-      const cards = document.querySelectorAll('[data-glass]');
-      const defs = document.getElementById('glass-defs');
-      let filterIndex = 0;
+      const cards = document.querySelectorAll('[data-glass]'), defs = document.getElementById('glass-defs');
+      defs.innerHTML = '';
+      cards.forEach(c => { const p = c.querySelector('.glass-panel'); if (p) { p.style.backdropFilter = ''; p.style.webkitBackdropFilter = ''; } });
+      let fi = 0;
       cards.forEach(card => {
-        if (!card.querySelector('.glass-panel')) return;
+        const panel = card.querySelector('.glass-panel');
+        if (!panel) return;
         requestAnimationFrame(() => {
           const rect = card.getBoundingClientRect();
           if (rect.width < 2 || rect.height < 2) return;
-          const w = Math.round(rect.width);
-          const h = Math.round(rect.height);
-          const radius = 12, bezelW = 30, glassThick = 60, ior = 2.5;
-          const blurAmt = 0.3, specOpacity = 0.5, specSat = 4;
-          const heightFn = SURFACE_FNS.convex_squircle;
-          const profile = calculateRefractionProfile(glassThick, bezelW, heightFn, ior, 128);
-          const maxDisp = Math.max(...Array.from(profile).map(Math.abs)) || 1;
-          const dispUrl = generateDisplacementMap(w, h, radius, bezelW, profile, maxDisp);
-          const specUrl = generateSpecularMap(w, h, radius, bezelW * 2.5);
-          const scale = maxDisp * 1.0;
-          const filterId = 'liquid-glass-' + filterIndex++;
+          const w = Math.round(rect.width), h = Math.round(rect.height), radius = 12, bezelW = 30, glassThick = 60, ior = 2.5, blurAmt = 0.3, specOpacity = 0.5, specSat = 4;
+          const profile = calcRefractionProfile(glassThick, bezelW, SURFACE_FNS.convex_squircle, ior, 128);
+          const maxD = Math.max(...Array.from(profile).map(Math.abs)) || 1;
+          const dispUrl = genDispMap(w, h, radius, bezelW, profile, maxD);
+          const specUrl = genSpecMap(w, h, radius, bezelW * 2.5);
+          const filterId = 'lg-' + (fi++);
           const filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
-          filter.setAttribute('id', filterId);
-          filter.setAttribute('x', '0%');
-          filter.setAttribute('y', '0%');
-          filter.setAttribute('width', '100%');
-          filter.setAttribute('height', '100%');
-          filter.innerHTML = `
-            <feGaussianBlur in="SourceGraphic" stdDeviation="${blurAmt}" result="blurred_source" />
-            <feImage href="${dispUrl}" x="0" y="0" width="${w}" height="${h}" result="disp_map" />
-            <feDisplacementMap in="blurred_source" in2="disp_map" scale="${scale}" xChannelSelector="R" yChannelSelector="G" result="displaced" />
-            <feColorMatrix in="displaced" type="saturate" values="${specSat}" result="displaced_sat" />
-            <feImage href="${specUrl}" x="0" y="0" width="${w}" height="${h}" result="spec_layer" />
-            <feComposite in="displaced_sat" in2="spec_layer" operator="in" result="spec_masked" />
-            <feComponentTransfer in="spec_layer" result="spec_faded"><feFuncA type="linear" slope="${specOpacity}" /></feComponentTransfer>
-            <feBlend in="spec_masked" in2="displaced" mode="normal" result="with_sat" />
-            <feBlend in="spec_faded" in2="with_sat" mode="normal" />
-          `;
+          filter.setAttribute('id', filterId); filter.setAttribute('x', '-20%'); filter.setAttribute('y', '-20%'); filter.setAttribute('width', '140%'); filter.setAttribute('height', '140%');
+          filter.innerHTML = `<feGaussianBlur in="SourceGraphic" stdDeviation="${blurAmt}" result="blurred_source"/><feImage href="${dispUrl}" x="0" y="0" width="${w}" height="${h}" result="disp_map"/><feDisplacementMap in="blurred_source" in2="disp_map" scale="${maxD * 1}" xChannelSelector="R" yChannelSelector="G" result="displaced"/><feColorMatrix in="displaced" type="saturate" values="${specSat}" result="displaced_sat"/><feImage href="${specUrl}" x="0" y="0" width="${w}" height="${h}" result="spec_layer"/><feComposite in="displaced_sat" in2="spec_layer" operator="in" result="spec_masked"/><feComponentTransfer in="spec_layer" result="spec_faded"><feFuncA type="linear" slope="${specOpacity}"/></feComponentTransfer><feBlend in="spec_masked" in2="displaced" mode="normal" result="with_sat"/><feBlend in="spec_faded" in2="with_sat" mode="normal"/>`;
           defs.appendChild(filter);
-          const panel = card.querySelector('.glass-panel');
-          if (!panel) return;
           panel.style.backdropFilter = `url(#${filterId})`;
           panel.style.webkitBackdropFilter = `url(#${filterId})`;
+          void panel.offsetHeight;
         });
       });
     }
+
+    let resizeTimer;
+    window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(initLiquidGlass, 150); });
 
     let proxyData = null;
     let config = {};
@@ -1124,26 +1033,27 @@
       document.getElementById('totalModels').textContent = models.length;
       document.getElementById('startedAt').textContent = new Date(proxyData.started_at).toLocaleString();
       document.getElementById('tokenCountBadge').textContent = proxyData.token_state.length;
-      if (!countryCodeSet) {
-        const bestToken = proxyData.token_state.find(t => t.country_code) || proxyData.token_state[0];
-        const cc = bestToken?.country_code || '-';
-        const tier = bestToken?.access_tier || '';
-        const el = document.getElementById('countryCode');
-        el.textContent = cc;
-        if (proxyData.opera_proxy && proxyData.opera_proxy.exit_country) {
-          const small = document.createElement('small');
-          small.textContent = '>' + proxyData.opera_proxy.exit_country;
-          small.style.marginLeft = '4px';
-          small.style.opacity = '0.7';
-          el.appendChild(small);
-        } else if (tier === 'limited') {
-          const small = document.createElement('small');
-          small.textContent = '(limit)';
-          small.style.marginLeft = '4px';
-          small.style.opacity = '0.7';
-          el.appendChild(small);
-        }
-        if (cc !== '-') countryCodeSet = true;
+      const bestToken = proxyData.token_state.find(t => t.country_code) || proxyData.token_state[0];
+      const cc = bestToken?.country_code || proxyData.proxy_rotator?.proxy_country || '-';
+      const tier = bestToken?.access_tier || '';
+      const el = document.getElementById('countryCode');
+      el.textContent = cc;
+      // Show proxy exit country in gray when routing through rotated proxy
+      const proxyCountry = bestToken?.proxy_country || proxyData.proxy_rotator?.proxy_country;
+      if (proxyCountry && proxyCountry !== cc) {
+        const small = document.createElement('small');
+        small.textContent = '>' + proxyCountry;
+        small.style.marginLeft = '4px';
+        small.style.opacity = '0.55';
+        small.style.color = '#b0c4de';
+        small.style.fontWeight = '500';
+        el.appendChild(small);
+      } else if (tier === 'limited') {
+        const small = document.createElement('small');
+        small.textContent = '(limit)';
+        small.style.marginLeft = '4px';
+        small.style.opacity = '0.7';
+        el.appendChild(small);
       }
       const activeToken = proxyData.token_state.find(t => t.remaining_ms && t.remaining_ms > 0);
       if (activeToken) {

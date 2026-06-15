@@ -204,6 +204,7 @@ function loadConfig() {
   if (process.env.PROXIFLY_API_KEY) rawConfig.PROXIFLY_API_KEY = process.env.PROXIFLY_API_KEY;
   if (process.env.PROXIFLY_COUNTRIES) rawConfig.PROXIFLY_COUNTRIES = process.env.PROXIFLY_COUNTRIES.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
   if (process.env.PROXY_COUNTRIES) rawConfig.PROXY_COUNTRIES = process.env.PROXY_COUNTRIES.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+  if (process.env.MOCK_COUNTRY) rawConfig.MOCK_COUNTRY = process.env.MOCK_COUNTRY.trim().toUpperCase();
   if (process.env.OUTBOUND_PROXY) rawConfig.OUTBOUND_PROXY = process.env.OUTBOUND_PROXY;
   if (!rawConfig.AUTH_TOKENS || rawConfig.AUTH_TOKENS.length === 0) {
     const cliTokens = loadFreebuffCLITokens();
@@ -228,6 +229,7 @@ function loadConfig() {
       : (Array.isArray(rawConfig.PROXY_COUNTRIES) && rawConfig.PROXY_COUNTRIES.length > 0
         ? rawConfig.PROXY_COUNTRIES
         : ['US','CA','GB','AU','NZ','NO','SE','NL','DK','FR','IT','ES','PT','FI','BE','LU','LI','CH','AT','SG','MT','IL','IE','IS']),
+    mockCountry: rawConfig.MOCK_COUNTRY || null,
     outboundProxy: rawConfig.OUTBOUND_PROXY || null,
     enabledModels: Array.isArray(rawConfig.ENABLED_MODELS) ? rawConfig.ENABLED_MODELS : null,
     legacyDisabledModels: Array.isArray(rawConfig.DISABLED_MODELS) ? rawConfig.DISABLED_MODELS : null
@@ -1792,6 +1794,7 @@ async function handleHealthz(req, res) {
       access_tier: bestSession?.accessTier || null,
       country_block_reason: bestSession?.countryBlockReason || null,
       via_proxy: bestSession?.viaProxy || false,
+      proxy_country: (bestSession?.viaProxy && proxyRotator) ? (proxyRotator.cache.get(`${token.substring(0, 12)}:${bestSession.model || ''}`)?.country || null) : null,
       proxy_url: proxyRotator ? proxyRotator.cache.get(bestSession ? `${token.substring(0, 12)}:${bestSession.model || ''}` : '')?.url?.replace(/\/\/[^@]*@/, '//***@') : null,
       remaining_ms: bestSession?.remainingMs || null,
       runs: []
@@ -1809,7 +1812,8 @@ async function handleHealthz(req, res) {
       enabled: config.proxyRotator,
       countries: config.proxiflyCountries,
       cached_proxies: proxyRotator ? proxyRotator.cache.size : 0,
-      failed_pool: proxyRotator ? proxyRotator.failed.size : 0
+      failed_pool: proxyRotator ? proxyRotator.failed.size : 0,
+      proxy_country: proxyRotator ? (Array.from(proxyRotator.cache.values())[0]?.country || null) : null
     },
     outbound_proxy: config.outboundProxy ? config.outboundProxy.replace(/\/\/[^@]*@/, '//***@') : null
   });
@@ -2447,6 +2451,11 @@ async function startServer() {
   await checkProxyVersion();
 
   await detectCountry();
+  // TEST MOCKS
+  if (config.mockCountry) {
+    DETECTED_COUNTRY = config.mockCountry;
+    console.log(`[Country] MOCKED to: ${DETECTED_COUNTRY}`);
+  }
 
   modelRegistry = new ModelRegistry();
   await modelRegistry.start();
