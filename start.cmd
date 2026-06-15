@@ -92,7 +92,7 @@ if %ERRORLEVEL% equ 0 (
 echo [ERROR] Neither Bun nor Node.js found in PATH.
 echo        Install Node: https://nodejs.org
 echo        Install Bun:  https://bun.sh
-timeout /t 5
+@if not defined OPENCODE_ATTACH timeout /t 5
 exit
 
 :start
@@ -100,7 +100,7 @@ echo [3/4] Installing dependencies...
 if "%RUNTIME%"=="bun" (
     bun install
 ) else (
-    npm install --production
+    call npm install --omit=dev
 )
 if exist "bun.lock" del /F /Q "bun.lock" >nul 2>&1
 if exist "package-lock.json" del /F /Q "package-lock.json" >nul 2>&1
@@ -126,4 +126,9 @@ echo.
 echo [ERROR] Proxy exited with code %EXIT_CODE%
 
 :done
+if not defined OPENCODE_ATTACH (
+    echo.
+    echo Press any key to close...
+    timeout /t 10 >nul
+)
 exit

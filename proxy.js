@@ -408,29 +408,41 @@ async function setupOpencodeConfig() {
         saveConfig(config);
       }
 
-      const existingModels = existing.provider['freebuff'] && existing.provider['freebuff'].models
-        ? Object.keys(existing.provider['freebuff'].models)
+      const existingModels = existing.provider['freebuff'] && existing.provider['freebuff'].models && Object.keys(existing.provider['freebuff'].models).length > 0
+        ? Object.keys(existing.provider['freebuff'].models).map(canonicalModelName)
         : null;
-      if (existingModels) {
-        const enabledSet = new Set(config.enabledModels);
+      if (existingModels && existingModels.length > 0) {
+        const enabledSet = new Set((config.enabledModels || []).map(canonicalModelName));
         const removedFromProvider = allRegistryModels.filter(m =>
-          enabledSet.has(m) && !existingModels.includes(m)
+          enabledSet.has(canonicalModelName(m)) && !existingModels.includes(canonicalModelName(m))
         );
         if (removedFromProvider.length > 0) {
-          config.enabledModels = config.enabledModels.filter(m => !removedFromProvider.includes(m));
+          config.enabledModels = config.enabledModels.filter(m => !removedFromProvider.includes(canonicalModelName(m)));
           saveConfig(config);
           for (const rm of removedFromProvider) console.log(`[Opencode] Detected manual removal of ${rm}, removed from ENABLED_MODELS`);
         }
       }
-      const enabledSet = new Set(config.enabledModels || []);
-      const models = {};
+      let enabledSet = new Set((config.enabledModels || []).map(canonicalModelName));
+      const unmatchedEnabled = (config.enabledModels || []).filter(m => !allRegistryModels.map(canonicalModelName).includes(canonicalModelName(m)));
+      if (unmatchedEnabled.length > 0) {
+        console.log(`[Opencode] Warning: enabled models not found in registry: ${unmatchedEnabled.join(', ')}`);
+      }
+      let models = {};
       for (const m of allRegistryModels) {
-        if (!enabledSet.has(m)) { console.log(`[Opencode] Skipping non-enabled model: ${m}`); continue; }
+        if (!enabledSet.has(canonicalModelName(m))) { console.log(`[Opencode] Skipping non-enabled model: ${m}`); continue; }
         const meta = modelRegistry.getModelMetadata(m);
         const name = meta && meta.premium ? `[LIM] ${modelRegistry.getDisplayName(m)}` : modelRegistry.getDisplayName(m);
         models[m] = { name };
       }
-      console.log(`[Opencode] enabledModels=[${config.enabledModels.join(', ')}] registry=${allRegistryModels.length} models, writing ${Object.keys(models).length} models to provider`);
+      if (Object.keys(models).length === 0 && allRegistryModels.length > 0) {
+        console.log(`[Opencode] Warning: no enabled models matched registry; falling back to all ${allRegistryModels.length} registry models`);
+        for (const m of allRegistryModels) {
+          const meta = modelRegistry.getModelMetadata(m);
+          const name = meta && meta.premium ? `[LIM] ${modelRegistry.getDisplayName(m)}` : modelRegistry.getDisplayName(m);
+          models[m] = { name };
+        }
+      }
+      console.log(`[Opencode] enabledModels=[${(config.enabledModels || []).join(', ')}] registry=${allRegistryModels.length} models, writing ${Object.keys(models).length} models to provider`);
       existing.provider['freebuff'] = {
         npm: '@ai-sdk/openai-compatible',
         name: 'Freebuff Proxy',

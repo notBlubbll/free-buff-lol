@@ -41,7 +41,9 @@ FREEBUFF-PROXY/
   - Caches discovered paths so opencode config updates don't rescan the disk
   - Iterates all model registry entries, includes only those in `config.enabledModels`
   - Adds `[LIM]` prefix to `name` for premium models (same convention as dashboard)
-  - Reads existing opencode.json before overwriting; if models are missing from the existing freebuff provider that are in the registry and still enabled, they're removed from `config.enabledModels` and persisted via `saveConfig()` — this makes manual model removal from opencode.json persist across restarts
+  - Reads existing opencode.json before overwriting; if `freebuff.provider.models` is non-empty and registry models that are still enabled are missing from it, they're removed from `config.enabledModels` and persisted via `saveConfig()` — this makes manual model removal from opencode.json persist across restarts
+  - Normalizes model IDs through `canonicalModelName()` when comparing enabled models against the registry
+  - Falls back to writing all registry models when the enabled list would otherwise produce an empty provider (e.g. stale IDs), and logs warnings about any enabled models that don't exist in the registry
   - Writes to all discovered `opencode.json` locations
 - `ENABLED_MODELS` — Config array of model IDs to include in the opencode provider; toggleable via dashboard
 - Auto-normalizes `codebuff.com` → `www.codebuff.com`
@@ -314,7 +316,7 @@ Cache session keyed by {token}:{model}
 2. `loadFreebuffCLITokens()` — Merge CLI tokens into config
 3. `checkAndUpdateVersions()` — Fetch latest version strings
 4. `new ModelRegistry()` + `.start()` — Fetch models from GitHub
-5. `setupOpencodeConfig()` — Write opencode provider config to all discovered `opencode.json` locations (full-drive search, filters disabled models, adds `[LIM]` prefix for premium, detects manual removals)
+5. `setupOpencodeConfig()` — Write opencode provider config to all discovered `opencode.json` locations (full-drive search, filters disabled models, adds `[LIM]` prefix for premium, detects manual removals, normalizes model IDs, falls back to all registry models if enabled list is stale)
 6. `validateAllTokens()` — Test each token
 7. `new TokenPool(validTokens, config, client)` — Initialize pool
 8. `http.createServer(handleRequest).listen(port)` — Start server
