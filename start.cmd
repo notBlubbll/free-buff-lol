@@ -1,35 +1,83 @@
 @echo off
 setlocal enabledelayedexpansion
 
-taskkill /F /FI "WINDOWTITLE eq UMANSProxy" /T >nul 2>&1
-timeout /t 1 /nobreak >nul
-
 cd /d "%~dp0"
 
-:: Detect port from config
-set "PORT=8084"
-set "CONFIG_FILE=%~dp0.config\config.json"
-if exist "%CONFIG_FILE%" (
-    for /f "usebackq delims=" %%a in (`powershell -NoProfile -Command "$c=Get-Content '%CONFIG_FILE%' -Raw | ConvertFrom-Json; $l=$c.LISTEN_ADDR; if($l -match ':(?<p>\d+)$'){Write-Output $matches['p']}else{Write-Output '8084'}"`) do set "PORT=%%a"
+echo ==================================================
+echo  Freebuff2Opencode Proxy
+echo ==================================================
+echo.
+
+set "BUN_PATH="
+
+where bun.exe >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    for /f "delims=" %%b in ('where bun.exe') do (
+        if not defined BUN_PATH set "BUN_PATH=%%~dpb"
+    )
+    goto :bunfound
 )
 
-title UMANSProxy
+where bun >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    for /f "delims=" %%b in ('where bun') do (
+        if not defined BUN_PATH set "BUN_PATH=%%~dpb"
+    )
+    goto :bunfound
+)
 
-echo ==================================================
-echo  UMANS-Proxy — http://localhost:%PORT%
-echo ==================================================
+for %%d in (
+    "%USERPROFILE%\.bun\bin"
+    "%LOCALAPPDATA%\bun\bin"
+    "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Oven-sh.Bun_Microsoft.Winget.Source_8wekyb3d8bbwe"
+    "%APPDATA%\bun\bin"
+    "%APPDATA%\npm\node_modules\@oven\bun\bin"
+    "%PROGRAMFILES%\bun\bin"
+    "%PROGRAMFILES%\nodejs\node_modules\@oven\bun\bin"
+    "%SYSTEMDRIVE%\.bun\bin"
+    "%SYSTEMDRIVE%\Program Files\Bun\bin"
+    "%SYSTEMDRIVE%\tools\bun"
+) do (
+    if exist "%%~d\bun.exe" (
+        set "BUN_PATH=%%~d"
+        goto :bunfound
+    )
+)
 
-set "BUN_PATH=C:\WINDOWS\system32\config\systemprofile\.bun\bin"
-set "PATH=%BUN_PATH%;%PATH%"
+for /f "delims=" %%u in ('dir /b /ad "C:\Users" 2^>nul') do (
+    if exist "C:\Users\%%u\.bun\bin\bun.exe" (
+        set "BUN_PATH=C:\Users\%%u\.bun\bin"
+        goto :bunfound
+    )
+    if exist "C:\Users\%%u\scoop\apps\bun\current\bun.exe" (
+        set "BUN_PATH=C:\Users\%%u\scoop\apps\bun\current"
+        goto :bunfound
+    )
+    if exist "C:\Users\%%u\AppData\Local\bun\bin\bun.exe" (
+        set "BUN_PATH=C:\Users\%%u\AppData\Local\bun\bin"
+        goto :bunfound
+    )
+)
 
-echo [1/3] Cleaning up...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%PORT% " ^| findstr "LISTENING"') do (
+:bunfound
+if defined BUN_PATH (
+    echo [INFO] Bun found at: %BUN_PATH%
+    set "PATH=%BUN_PATH%;%PATH%"
+)
+
+echo [1/4] Cleaning up...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8080.*LISTENING"') do (
     taskkill /PID %%a /F >nul 2>&1
 )
 timeout /t 1 /nobreak >nul
 
-echo [2/3] Detecting runtime...
-where bun >nul 2>&1
+echo [2/4] Detecting runtime...
+if defined BUN_PATH (
+    echo [INFO] Runtime: Bun
+    set "RUNTIME=bun"
+    goto :start
+)
+where bun.exe >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo [INFO] Runtime: Bun
     set "RUNTIME=bun"
@@ -44,14 +92,27 @@ if %ERRORLEVEL% equ 0 (
 echo [ERROR] Neither Bun nor Node.js found in PATH.
 echo        Install Node: https://nodejs.org
 echo        Install Bun:  https://bun.sh
-pause
+@if not defined OPENCODE_ATTACH timeout /t 5
 exit
 
 :start
-echo [3/3] Starting proxy...
+echo [3/4] Installing dependencies...
+if "%RUNTIME%"=="bun" (
+    bun install
+) else (
+    call npm install --omit=dev
+)
+if exist "bun.lock" del /F /Q "bun.lock" >nul 2>&1
+if exist "package-lock.json" del /F /Q "package-lock.json" >nul 2>&1
+
+echo [4/4] Starting proxy...
+echo.
+echo ==================================================
+echo  Proxy: http://127.0.0.1:8080
+echo  Dashboard: http://127.0.0.1:8080/dashboard
+echo ==================================================
 echo.
 
-:restart_loop
 if "%RUNTIME%"=="bun" (
     bun run proxy.js
 ) else (
@@ -59,17 +120,15 @@ if "%RUNTIME%"=="bun" (
 )
 
 set EXIT_CODE=%ERRORLEVEL%
-if %EXIT_CODE% equ 42 (
-    echo [INFO] Restarting proxy...
-    timeout /t 2 /nobreak >nul
-    goto :restart_loop
-)
 if %EXIT_CODE% equ 0 goto :done
 if %EXIT_CODE% equ -1073741819 goto :done
 echo.
 echo [ERROR] Proxy exited with code %EXIT_CODE%
 
 :done
-echo.
-echo Proxy stopped.
-timeout /t 5 /nobreak >nul
+if not defined OPENCODE_ATTACH (
+    echo.
+    echo Press any key to close...
+    timeout /t 10 >nul
+)
+exit
