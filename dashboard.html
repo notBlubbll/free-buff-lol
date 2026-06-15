@@ -863,7 +863,10 @@
 
     function getModelDisplayName(model) {
       const meta = modelMetadata[model];
-      if (meta) return meta.premium ? `[LIM] ${meta.displayName}` : meta.displayName;
+      if (meta) {
+        const prefix = meta.premium ? '[LIM] ' : '';
+        return prefix + meta.displayName;
+      }
       return model.split('/').pop();
     }
 

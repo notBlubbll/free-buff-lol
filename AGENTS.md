@@ -40,7 +40,7 @@ FREEBUFF-PROXY/
   - Discovers all `opencode.json` files on the system asynchronously at startup (full-drive search on Windows, full filesystem search elsewhere, using `bash`/`find`)
   - Caches discovered paths so opencode config updates don't rescan the disk
   - Iterates all model registry entries, includes only those in `config.enabledModels`
-  - Adds `[LIM]` prefix to `name` for premium models (same convention as dashboard)
+  - Adds `[LIM]` prefix to `name` for limited (premium) models (same convention as dashboard)
   - Reads existing opencode.json before overwriting; if `freebuff.provider.models` is non-empty and registry models that are still enabled are missing from it, they're removed from `config.enabledModels` and persisted via `saveConfig()` — this makes manual model removal from opencode.json persist across restarts
   - Normalizes model IDs through `canonicalModelName()` when comparing enabled models against the registry
   - Falls back to writing all registry models when the enabled list would otherwise produce an empty provider (e.g. stale IDs), and logs warnings about any enabled models that don't exist in the registry
@@ -316,7 +316,7 @@ Cache session keyed by {token}:{model}
 2. `loadFreebuffCLITokens()` — Merge CLI tokens into config
 3. `checkAndUpdateVersions()` — Fetch latest version strings
 4. `new ModelRegistry()` + `.start()` — Fetch models from GitHub
-5. `setupOpencodeConfig()` — Write opencode provider config to all discovered `opencode.json` locations (full-drive search, filters disabled models, adds `[LIM]` prefix for premium, detects manual removals, normalizes model IDs, falls back to all registry models if enabled list is stale)
+5. `setupOpencodeConfig()` — Write opencode provider config to all discovered `opencode.json` locations (full-drive search, filters disabled models, adds `[LIM]` prefix for limited models, detects manual removals, normalizes model IDs, falls back to all registry models if enabled list is stale)
 6. `validateAllTokens()` — Test each token
 7. `new TokenPool(validTokens, config, client)` — Initialize pool
 8. `http.createServer(handleRequest).listen(port)` — Start server
@@ -447,7 +447,7 @@ Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 - [ ] Token expiration detection
 - [ ] Automatic token refresh
 - [x] Rate limiting — Global 1.3s debounce + 429 retry with progressive backoff
-- [x] Auto-configure opencode provider — Writes `opencode.json` on startup with `[LIM]` prefix for premium models, respects `ENABLED_MODELS`, syncs manual model removals back to config
+- [x] Auto-configure opencode provider — Writes `opencode.json` on startup with `[LIM]` prefix for limited models, respects `ENABLED_MODELS`, syncs manual model removals back to config
 - [x] HAR-style fingerprinting — Browser-compatible headers for upstream compatibility
 - [x] Agent validation — Validates agent definitions with upstream before chat requests
 - [x] Ad chain + streak — Completes ad flow and streak check before session creation

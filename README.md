@@ -37,22 +37,29 @@ country detection + bypass:<br>
 
 ## Available Models
 
-The proxy fetches models from Freebuff's TypeScript source. Current models:
+The proxy fetches models from Freebuff's TypeScript source. Current user-selectable models:
 
 | Model | Agent ID | Tier | Data Training |
 |-------|----------|------|---------------|
-| `minimax/minimax-m2.7` | `base2-free` | Full | No |
-| `minimax/minimax-m3` | `base2-free-minimax-m3` | Premium | No |
-| `moonshotai/kimi-k2.6` | `base2-free-kimi` | Premium | No |
-| `deepseek/deepseek-v4-pro` | `base2-free-deepseek` | Premium | **Yes** |
-| `deepseek/deepseek-v4-flash` | `base2-free-deepseek-flash` | Limited | **Yes** |
-| `mimo/mimo-v2.5-pro` | `base2-free-mimo-pro` | Premium | No |
-| `mimo/mimo-v2.5` | `base2-free-mimo` | — | No |
-| `google/gemini-2.5-flash-lite` | `base2-free-deepseek-flash` | — | No |
-| `google/gemini-3.1-flash-lite-preview` | `base2-free-deepseek-flash` | — | No |
-| `google/gemini-3.1-pro-preview` | `base2-free-kimi` | — | No |
+| `minimax/minimax-m2.7` | `base2-free` | Free | No |
+| `minimax/minimax-m3` | `base2-free-minimax-m3` | Free | **Yes** |
+| `deepseek/deepseek-v4-flash` | `base2-free-deepseek-flash` | Free | **Yes** |
+| `mimo/mimo-v2.5` | `base2-free-mimo` | Free | No |
+| `google/gemini-3.1-flash-lite-preview` | `base2-free-deepseek-flash` | Free | No |
+| `deepseek/deepseek-v4-pro` | `base2-free-deepseek` | Limited | **Yes** |
+| `mimo/mimo-v2.5-pro` | `base2-free-mimo-pro` | Limited | No |
+| `moonshotai/kimi-k2.6` | `base2-free-kimi` | Limited | No |
 
-The first 7 models are user-selectable in the dashboard. Gemini models are used internally as subagents for deeper reasoning.
+Model characteristics:
+
+- **MiniMax M3** — smartest unlimited model, multimodal. Its API collects data for training.
+- **MiniMax M2.7** — fastest unlimited model.
+- **DeepSeek V4 Pro** — smartest. Its API collects data for training.
+- **MiMo 2.5 Pro** — smartest and multimodal, but slower.
+- **Kimi K2.6** — balanced and multimodal.
+- **DeepSeek V4 Flash** — most efficient. Its API also collects data for training.
+- **MiMo 2.5** — multimodal.
+- **Gemini 3.1 Flash Lite** — efficient Google model.
 
 Shortcuts (auto-resolve to full model name):
 - `deepseek-v4-pro` → `deepseek/deepseek-v4-pro`
@@ -63,6 +70,7 @@ Shortcuts (auto-resolve to full model name):
 - `kimi-k2.6` → `moonshotai/kimi-k2.6`
 - `minimax-m2.7` → `minimax/minimax-m2.7`
 - `minimax-m3` → `minimax/minimax-m3`
+- `gemini-3.1-flash-lite` → `google/gemini-3.1-flash-lite-preview`
 
 Models are toggleable in the dashboard UI.
 
@@ -102,23 +110,14 @@ Freebuff has two access tiers that determine which models you can use:
 
 | Tier | Available Models | Session Limit |
 |------|-----------------|---------------|
-| **Limited** | `deepseek/deepseek-v4-flash` only | 5/day |
-| **Full** | All 5 models | 5/day |
+| **Free** | `minimax/minimax-m2.7`, `minimax/minimax-m3`, `deepseek/deepseek-v4-flash`, `mimo/mimo-v2.5`, `google/gemini-3.1-flash-lite-preview` | none |
+| **Limited** | Free models + `deepseek/deepseek-v4-pro`, `mimo/mimo-v2.5-pro`, `moonshotai/kimi-k2.6` | 5 one-hour sessions per day |
 
-Both tiers share the same session limit: **5 sessions per day**, resetting at **midnight Pacific time**.
+Limited-tier sessions are limited to **5 one-hour sessions per day**.
 
-Within the full tier, two models are marked as **premium** and may require additional access:
-- `deepseek/deepseek-v4-pro` (Smartest) — Premium, **collects data for training**
-- `moonshotai/kimi-k2.6` (Balanced) — Premium
-- `minimax/minimax-m3` — Premium
-- `mimo/mimo-v2.5-pro` — Premium
-- `minimax/minimax-m2.7` (Fastest) — Non-premium
-- `deepseek/deepseek-v4-flash` (Most efficient) — Non-premium, **collects data for training**
-- `mimo/mimo-v2.5` — Non-premium
+There are no premium models — all listed models are available under either the Free or Limited tier. The proxy can route limited-tier requests through a Cloudflare WARP SOCKS5 proxy to bypass rate limits.
 
-New freebuff users typically start in **limited tier**, which only allows `deepseek/deepseek-v4-flash` — the model that collects data for training. To access all models, you need full tier access.
-
-When the upstream returns a `session_model_mismatch` error (e.g., requesting `minimax/minimax-m2.7` on a limited-tier session), the proxy automatically switches to `deepseek/deepseek-v4-flash` and retries.
+When the upstream returns a `session_model_mismatch` error (e.g., requesting a limited-tier-only model on a free session), the proxy automatically switches to an available free model and retries.
 
 When the upstream returns a `model_locked` error (the current free session is bound to a different model), the proxy attempts to end the existing session and create a fresh session for the requested model. Only if that fails does it fall back to the locked model.
 
@@ -305,7 +304,7 @@ The proxy **automatically configures** the opencode provider on startup. It writ
 
 The auto-config:
 - Includes only **enabled models** (respects `ENABLED_MODELS` in config)
-- Prefixes premium model display names with `[LIM]` (matching the dashboard convention)
+- Prefixes limited model display names with `[LIM]` (matching the dashboard convention)
 - Creates a backup (`openconfig.b4freebuff.json`) on first run
 - **Detects manual model removals** from opencode.json and syncs them into `ENABLED_MODELS` in `.config/config.json`
 
@@ -391,7 +390,7 @@ dashboard.html (1023 lines)
 2. `loadFreebuffCLITokens()` — Auto-detect CLI tokens from `~/.config/manicode/credentials.json`
 3. `checkAndUpdateVersions()` — Fetch latest versions from upstream sources
 4. `ModelRegistry.start()` — Fetch and parse model definitions from GitHub
-5. `setupOpencodeConfig()` — Write opencode provider config (respects `ENABLED_MODELS`, adds `[LIM]` for premium models, detects manual model removals and syncs to config)
+5. `setupOpencodeConfig()` — Write opencode provider config (respects `ENABLED_MODELS`, adds `[LIM]` for limited models, detects manual model removals and syncs to config)
 6. `validateAllTokens()` — Verify each token via `createSession()`
 7. `TokenPool` — Initialize with valid tokens
 8. `http.createServer()` — Start HTTP server
@@ -445,8 +444,8 @@ If Warp Plus fails to start or the SOCKS5 proxy on port 8086 is not reachable:
 ### Model Lock Errors
 
 If you see `session_model_mismatch` errors:
-- Your session is in **limited tier** — only `deepseek/deepseek-v4-flash` is available
-- The proxy automatically switches to this model and retries
+- Your session is in **limited tier** and the requested model is not available on it
+- The proxy automatically switches to an available free/limited model and retries
 - No user action needed — this is handled transparently
 
 If you see `model_locked` errors:

@@ -47,6 +47,8 @@ const CANONICAL_MODEL_ALIASES = {
   'mimo-v2.5': 'mimo/mimo-v2.5',
   'kimi-k2.6': 'moonshotai/kimi-k2.6',
   'minimax-m2.7': 'minimax/minimax-m2.7',
+  'minimax-m3': 'minimax/minimax-m3',
+  'gemini-3.1-flash-lite': 'google/gemini-3.1-flash-lite-preview',
 };
 
 const FALLBACK_AGENT_IDS = {
@@ -443,7 +445,7 @@ async function setupOpencodeConfig() {
         if (!enabledSet.has(canonicalModelName(m))) { console.log(`[Opencode] Skipping non-enabled model: ${m}`); continue; }
         const meta = modelRegistry.getModelMetadata(m);
         const name = meta && meta.premium ? `[LIM] ${modelRegistry.getDisplayName(m)}` : modelRegistry.getDisplayName(m);
-        models[m] = { name };
+        models[m] = { name, multimodal: meta ? meta.multimodal : undefined, free: meta ? meta.free : undefined };
       }
       if (Object.keys(models).length === 0 && allRegistryModels.length > 0) {
         console.log(`[Opencode] Warning: no enabled models matched registry; falling back to all ${allRegistryModels.length} registry models`);
@@ -497,10 +499,11 @@ class ModelRegistry {
       { model: 'deepseek/deepseek-v4-pro', agent: 'base2-free-deepseek', displayName: 'DeepSeek V4 Pro', premium: true, multimodal: false },
       { model: 'mimo/mimo-v2.5-pro', agent: 'base2-free-mimo-pro', displayName: 'MiMo 2.5 Pro', premium: true, multimodal: true },
       { model: 'moonshotai/kimi-k2.6', agent: 'base2-free-kimi', displayName: 'Kimi K2.6', premium: true, multimodal: true },
-      { model: 'minimax/minimax-m3', agent: 'base2-free-minimax-m3', displayName: 'MiniMax M3', premium: false, multimodal: true },
-      { model: 'deepseek/deepseek-v4-flash', agent: 'base2-free-deepseek-flash', displayName: 'DeepSeek V4 Flash', premium: false, multimodal: false },
-      { model: 'mimo/mimo-v2.5', agent: 'base2-free-mimo', displayName: 'MiMo 2.5', premium: false, multimodal: true },
-      { model: 'minimax/minimax-m2.7', agent: 'base2-free', displayName: 'MiniMax M2.7', premium: false, multimodal: false },
+      { model: 'minimax/minimax-m3', agent: 'base2-free-minimax-m3', displayName: 'MiniMax M3', premium: false, multimodal: true, free: true },
+      { model: 'deepseek/deepseek-v4-flash', agent: 'base2-free-deepseek-flash', displayName: 'DeepSeek V4 Flash', premium: false, multimodal: false, free: true },
+      { model: 'mimo/mimo-v2.5', agent: 'base2-free-mimo', displayName: 'MiMo 2.5', premium: false, multimodal: true, free: true },
+      { model: 'minimax/minimax-m2.7', agent: 'base2-free', displayName: 'MiniMax M2.7', premium: false, multimodal: false, free: true },
+      { model: 'google/gemini-3.1-flash-lite-preview', agent: 'base2-free-deepseek-flash', displayName: 'Gemini 3.1 Flash Lite', premium: false, multimodal: false, free: true },
     ];
 
     let loaded = false;
@@ -532,7 +535,7 @@ class ModelRegistry {
           const meta = parsedMetadata.get(model);
           const displayName = meta ? meta.displayName : model.split('/').pop();
           modelDisplayNames.set(model, displayName);
-          modelMetadata.set(model, meta || { displayName, premium: false, multimodal: false });
+          modelMetadata.set(model, meta || { displayName, premium: false, multimodal: false, free: false });
           if (!agentModels.has(agent)) agentModels.set(agent, []);
           agentModels.get(agent).push(model);
         }
@@ -562,7 +565,7 @@ class ModelRegistry {
         modelToAgent.set(entry.model, entry.agent);
         allModels.push(entry.model);
         modelDisplayNames.set(entry.model, entry.displayName);
-        modelMetadata.set(entry.model, { displayName: entry.displayName, premium: entry.premium, multimodal: entry.multimodal });
+        modelMetadata.set(entry.model, { displayName: entry.displayName, premium: entry.premium, multimodal: entry.multimodal, free: entry.free || false });
         if (!agentModels.has(entry.agent)) agentModels.set(entry.agent, []);
         agentModels.get(entry.agent).push(entry.model);
       }
@@ -701,7 +704,7 @@ class ModelRegistry {
       const blockMatch = lines[i].match(/^const\s+(\w+)\s*=\s*\{$/);
       if (!blockMatch) continue;
       const varName = blockMatch[1];
-      let id = null, displayName = null, premium = false, multimodal = false;
+      let id = null, displayName = null, premium = false, multimodal = false, free = false;
       for (let j = i + 1; j < Math.min(i + 20, lines.length); j++) {
         const line = lines[j];
         if (line.trim().startsWith('}')) break;
@@ -716,8 +719,10 @@ class ModelRegistry {
         if (premMatch) premium = premMatch[1] === 'true';
         const mmMatch = line.match(/multimodal:\s*(true|false)/);
         if (mmMatch) multimodal = mmMatch[1] === 'true';
+        const freeMatch = line.match(/free:\s*(true|false)/);
+        if (freeMatch) free = freeMatch[1] === 'true';
       }
-      if (id && displayName) result.set(id, { displayName, premium, multimodal });
+      if (id && displayName) result.set(id, { displayName, premium, multimodal, free });
     }
     return result;
   }
