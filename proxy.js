@@ -200,7 +200,10 @@ function loadConfig() {
   if (process.env.AUTH_TOKENS) rawConfig.AUTH_TOKENS = process.env.AUTH_TOKENS.split(',').map(t => t.trim()).filter(Boolean);
   if (process.env.API_KEYS) rawConfig.API_KEYS = process.env.API_KEYS.split(',').map(t => t.trim()).filter(Boolean);
   if (process.env.ENABLED_MODELS) rawConfig.ENABLED_MODELS = process.env.ENABLED_MODELS.split(',').map(t => t.trim()).filter(Boolean);
-  if (process.env.WARP_PLUS !== undefined) rawConfig.WARP_PLUS = process.env.WARP_PLUS === 'true';
+  if (process.env.PROXY_ROTATOR !== undefined) rawConfig.PROXY_ROTATOR = process.env.PROXY_ROTATOR === 'true';
+  if (process.env.PROXIFLY_API_KEY) rawConfig.PROXIFLY_API_KEY = process.env.PROXIFLY_API_KEY;
+  if (process.env.PROXIFLY_COUNTRIES) rawConfig.PROXIFLY_COUNTRIES = process.env.PROXIFLY_COUNTRIES.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+  if (process.env.PROXY_COUNTRIES) rawConfig.PROXY_COUNTRIES = process.env.PROXY_COUNTRIES.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
   if (process.env.OUTBOUND_PROXY) rawConfig.OUTBOUND_PROXY = process.env.OUTBOUND_PROXY;
   if (!rawConfig.AUTH_TOKENS || rawConfig.AUTH_TOKENS.length === 0) {
     const cliTokens = loadFreebuffCLITokens();
@@ -218,7 +221,13 @@ function loadConfig() {
     authTokens: [...new Set(rawConfig.AUTH_TOKENS || [])],
     requestTimeout,
     apiKeys: [...new Set(rawConfig.API_KEYS || [])],
-    warpPlus: rawConfig.WARP_PLUS !== false,
+    proxyRotator: rawConfig.PROXY_ROTATOR !== false,
+    proxiflyApiKey: rawConfig.PROXIFLY_API_KEY || null,
+    proxiflyCountries: Array.isArray(rawConfig.PROXIFLY_COUNTRIES) && rawConfig.PROXIFLY_COUNTRIES.length > 0
+      ? rawConfig.PROXIFLY_COUNTRIES
+      : (Array.isArray(rawConfig.PROXY_COUNTRIES) && rawConfig.PROXY_COUNTRIES.length > 0
+        ? rawConfig.PROXY_COUNTRIES
+        : ['US','CA','GB','AU','NZ','NO','SE','NL','DK','FR','IT','ES','PT','FI','BE','LU','LI','CH','AT','SG','MT','IL','IE','IS']),
     outboundProxy: rawConfig.OUTBOUND_PROXY || null,
     enabledModels: Array.isArray(rawConfig.ENABLED_MODELS) ? rawConfig.ENABLED_MODELS : null,
     legacyDisabledModels: Array.isArray(rawConfig.DISABLED_MODELS) ? rawConfig.DISABLED_MODELS : null
@@ -727,159 +736,264 @@ class ModelRegistry {
   }
 }
 
-// --- Warp Plus Manager ---
-const WARP_PLUS_RELEASE_URL = 'https://github.com/bepass-org/warp-plus/releases/download/v1.2.6/warp-plus_windows-amd64.zip';
-const WARP_PLUS_BIN_LOCAL = path.join(__dirname, 'bin', 'warp-plus.exe');
-const WARP_PLUS_PORT = 8086;
-const WARP_PLUS_ADDR = `socks5://127.0.0.1:${WARP_PLUS_PORT}`;
+// --- Proxy Rotator (proxyfreeonly.com) ---
+const PROXYFREEONLY_API_URL = 'https://proxyfreeonly.com/api/free-proxy-list';
+const PROXY_ROTATOR_ALLOWED_COUNTRIES = ['US','CA','GB','AU','NZ','NO','SE','NL','DK','DE','FR','IT','ES','PT','FI','BE','LU','LI','CH','AT','SG','MT','IL','IE','IS'];
 
-function findWarpPlusBin() {
-  const names = process.platform === 'win32' ? ['warp-plus.exe', 'warp-plus'] : ['warp-plus'];
-  const pathDirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
-  for (const dir of pathDirs) {
-    for (const name of names) {
-      try {
-        const full = path.join(dir, name);
-        if (fs.existsSync(full) && fs.statSync(full).isFile()) return full;
-      } catch (e) {}
-    }
-  }
-  return null;
+function proxyUrlFromEntry(entry) {
+  if (!entry || !entry.ip || !entry.port) return null;
+  const protocols = Array.isArray(entry.protocols) ? entry.protocols : [];
+  const protocol = protocols.find(p => ['socks5','https','socks4'].includes(p)) || protocols[0] || 'http';
+  return `${protocol}://${entry.ip}:${entry.port}`;
 }
 
-function getWarpPlusBin() {
-  return findWarpPlusBin() || WARP_PLUS_BIN_LOCAL;
+function buildProxyAgent(proxyUrl) {
+  if (!proxyUrl) return null;
+  try {
+    if (proxyUrl.startsWith('socks5://') || proxyUrl.startsWith('socks5h://') || proxyUrl.startsWith('socks4://') || proxyUrl.startsWith('socks4a://')) {
+      return new SocksProxyAgent(proxyUrl);
+    }
+    if (proxyUrl.startsWith('http://') || proxyUrl.startsWith('https://')) {
+      const { HttpsProxyAgent } = require('https-proxy-agent');
+      return new HttpsProxyAgent(proxyUrl);
+    }
+    return new SocksProxyAgent('socks5://' + proxyUrl);
+  } catch (e) {
+    console.error(`[ProxyRotator] Failed to build agent for ${proxyUrl.replace(/\/\/[^@]*@/, '//***@')}: ${e.message}`);
+    return null;
+  }
 }
 
-class WarpPlusManager {
-  constructor() {
-    this.process = null;
-    this.ready = false;
-    this.starting = false;
-    this.proxyAgent = null;
-    this.lastEndpoint = null;
-  }
-
-  async ensureBinary() {
-    const binPath = getWarpPlusBin();
-    if (fs.existsSync(binPath)) {
-      this._binPath = binPath;
-      const inPath = binPath !== WARP_PLUS_BIN_LOCAL;
-      console.log(`[WarpPlus] Binary found at: ${binPath}${inPath ? ' (from PATH)' : ' (local)'}`);
-      return true;
-    }
-    console.log('[WarpPlus] Binary not found in PATH or local, downloading...');
-    const binDir = path.dirname(WARP_PLUS_BIN_LOCAL);
-    if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
-    const tmpPath = WARP_PLUS_BIN_LOCAL + '.tmp';
-    const zipPath = path.join(binDir, 'warp-plus.zip');
+async function fetchProxyFreeOnlyList(countries, limit = 500) {
+  const list = [];
+  for (const country of countries) {
     try {
-      const resp = await fetch(WARP_PLUS_RELEASE_URL, { redirect: 'follow' });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const buffer = Buffer.from(await resp.arrayBuffer());
-      fs.writeFileSync(zipPath, buffer);
-      const { execSync } = require('child_process');
-      execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${binDir}' -Force"`);
-      fs.unlinkSync(zipPath);
-      if (!fs.existsSync(WARP_PLUS_BIN_LOCAL)) throw new Error('warp-plus.exe not found after extraction');
-      this._binPath = WARP_PLUS_BIN_LOCAL;
-      console.log('[WarpPlus] Binary downloaded successfully');
-      return true;
-    } catch (e) {
-      console.error('[WarpPlus] Failed to download binary:', e.message);
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
-      try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch {}
-      return false;
-    }
-  }
-
-  async start() {
-    if (this.process || this.starting) return true;
-    this.starting = true;
-    const hasBin = await this.ensureBinary();
-    if (!hasBin) { this.starting = false; return false; }
-    const binPath = this._binPath || getWarpPlusBin();
-    console.log(`[WarpPlus] Starting SOCKS5 proxy on port ${WARP_PLUS_PORT}...`);
-    try {
-      const args = ['-b', `127.0.0.1:${WARP_PLUS_PORT}`, '-4'];
-      if (this.lastEndpoint) {
-        args.push('-e', this.lastEndpoint);
-        console.log(`[WarpPlus] Reusing cached endpoint: ${this.lastEndpoint}`);
-      }
-      this.process = spawn(binPath, args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-        cwd: path.dirname(binPath)
-      });
-      this.process.stdout.on('data', (d) => {
-        const msg = d.toString().trim();
-        if (msg && !msg.includes('connection test failed')) {
-          console.log(`[WarpPlus] ${msg}`);
-          const epMatch = msg.match(/using warp endpoints.*?"\[(.+?)\]"/);
-          if (epMatch) this.lastEndpoint = epMatch[1].split(' ')[0].trim();
+      const url = `${PROXYFREEONLY_API_URL}?limit=${limit}&page=1&country=${country}&sortBy=lastChecked&sortType=desc`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const items = Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : []);
+      for (const item of items) {
+        const urlStr = proxyUrlFromEntry(item);
+        if (urlStr) {
+          list.push({ ...item, proxyUrl: urlStr, listCountry: country });
         }
-      });
-      this.process.stderr.on('data', (d) => {
-        const msg = d.toString().trim();
-        if (msg && !msg.includes('connection test failed')) console.log(`[WarpPlus] ${msg}`);
-      });
-      this.process.on('exit', (code) => {
-        console.log(`[WarpPlus] Process exited with code ${code}`);
-        this.process = null;
-        this.ready = false;
-        this.proxyAgent = null;
-      });
-      this.process.on('error', (e) => {
-        console.error(`[WarpPlus] Process error: ${e.message}`);
-        this.process = null;
-        this.ready = false;
-        this.proxyAgent = null;
-      });
-      await this._waitForReady(20000);
-      this.proxyAgent = new SocksProxyAgent(WARP_PLUS_ADDR);
-      this.ready = true;
-      this.starting = false;
-      console.log(`[WarpPlus] Ready${this.lastEndpoint ? ' (endpoint: ' + this.lastEndpoint + ')' : ''}`);
-      return true;
-    } catch (e) {
-      console.error('[WarpPlus] Failed to start:', e.message);
-      this.stop();
-      this.starting = false;
-      return false;
-    }
-  }
-
-  async _waitForReady(timeout) {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-      if (!this.process || !this.process.pid) throw new Error('process died');
-      try {
-        const agent = new SocksProxyAgent(WARP_PLUS_ADDR);
-        await nodeFetch('https://api.ipify.org?format=json', { agent, signal: AbortSignal.timeout(3000) });
-        return;
-      } catch {
-        await new Promise(r => setTimeout(r, 1000));
       }
+    } catch (e) {
+      console.error(`[ProxyRotator] Failed to fetch list for ${country}: ${e.message}`);
     }
-    throw new Error('readiness timeout');
   }
-
-  stop() {
-    if (this.process) {
-      try { this.process.kill(); } catch {}
-      this.process = null;
-    }
-    this.ready = false;
-    this.proxyAgent = null;
-    this.starting = false;
-  }
-
-  isReady() { return this.ready && this.proxyAgent !== null; }
-  getAgent() { return this.proxyAgent; }
+  // Sort by last checked / uptime-ish meta, descending recency
+  list.sort((a, b) => {
+    const av = (a.lastChecked || a.updated_at || 0);
+    const bv = (b.lastChecked || b.updated_at || 0);
+    if (av > bv) return -1;
+    if (av < bv) return 1;
+    return (b.upTime || 0) - (a.upTime || 0);
+  });
+  return list;
 }
 
-const warpPlus = new WarpPlusManager();
+class ProxyRotator {
+  constructor(cfg) {
+    this.cfg = cfg;
+    this.countries = Array.isArray(cfg.proxiflyCountries) && cfg.proxiflyCountries.length > 0 ? cfg.proxiflyCountries : PROXY_ROTATOR_ALLOWED_COUNTRIES;
+    this.cache = new Map(); // key(tokenPrefix:model) -> { url, agent, country }
+    this.failed = new Set(); // proxy urls that failed session test
+    this.list = []; // current fetched proxy list
+    this.listIndex = 0;
+  }
 
+  _cacheKey(token, model) { return `${token.substring(0, 12)}:${model}`; }
+
+  _allCacheKeysForToken(token) {
+    const prefix = token.substring(0, 12);
+    const keys = [];
+    for (const key of this.cache.keys()) {
+      if (key.startsWith(prefix + ':')) keys.push(key);
+    }
+    return keys;
+  }
+
+  async _testProxyConnectivity(proxyUrl, agent) {
+    try {
+      const resp = await nodeFetch('https://api.ipify.org?format=json', { agent, signal: AbortSignal.timeout(8000) });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      return data.ip || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async _detectProxyCountry(agent) {
+    // disabled: free proxies inconsistently route geo checks; rely on Codebuff's own countryCode
+    return null;
+  }
+
+  _isAllowedProxyCountry(code) {
+    // Accept any upstream-reported country. Empty country code defaults to allowed.
+    return true;
+  }
+
+  async _endAllUpstreamSessions(token, agent = null) {
+    try {
+      const baseURL = this.cfg.upstreamBaseURL;
+      await nodeFetch(`${baseURL}/api/v1/freebuff/session`, {
+        method: 'DELETE',
+        headers: {
+          'Accept': '*/*',
+          'Accept-Encoding': 'gzip, deflate',
+          'Connection': 'keep-alive',
+          'Host': new URL(baseURL).host,
+          'User-Agent': FREEBUFF_CLI_USER_AGENT,
+          'Authorization': `Bearer ${token}`
+        },
+        agent,
+        signal: AbortSignal.timeout(10000)
+      });
+    } catch {}
+  }
+
+  async _testCodebuffSession(token, agent, model = '') {
+    const baseURL = this.cfg.upstreamBaseURL;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      const extraHeaders = {};
+      if (model) extraHeaders['x-freebuff-model'] = model;
+      const resp = await nodeFetch(`${baseURL}/api/v1/freebuff/session`, {
+        method: 'POST',
+        headers: {
+          'Accept': '*/*',
+          'Accept-Encoding': 'gzip, deflate',
+          'Connection': 'keep-alive',
+          'Host': new URL(baseURL).host,
+          'User-Agent': FREEBUFF_CLI_USER_AGENT,
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...extraHeaders
+        },
+        body: '{}',
+        agent,
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      const data = await resp.text();
+      let json = null;
+      try { json = JSON.parse(data); } catch {}
+      const status = (json && json.status) ? json.status.trim() : '';
+      const countryBlockReason = (json && json.countryBlockReason) ? json.countryBlockReason : null;
+      const accessTier = (json && json.accessTier) ? json.accessTier : null;
+      const countryCode = (json && json.countryCode) ? json.countryCode.toUpperCase() : null;
+
+      if (status === 'model_locked' && json && json.currentModel) {
+        return { ok: false, status, currentModel: json.currentModel, countryBlockReason, accessTier, countryCode, raw: data, retryable: true };
+      }
+
+      const ok = resp.status >= 200 && resp.status < 300 && status === 'active' && !countryBlockReason && accessTier !== 'limited';
+      return { ok, status, countryBlockReason, accessTier, countryCode, raw: data };
+    } catch (e) {
+      clearTimeout(timer);
+      return { ok: false, error: e.message };
+    }
+  }
+
+  async _fetchMoreIfNeeded() {
+    if (this.listIndex >= this.list.length) {
+      this.list = await fetchProxyFreeOnlyList(this.countries);
+      this.listIndex = 0;
+      console.log(`[ProxyRotator] Fetched ${this.list.length} proxies from proxyfreeonly.com for ${this.countries.join(',')}`);
+    }
+  }
+
+  async _tryNextProxy(token, model, maxAttempts = 100) {
+    for (let i = 0; i < maxAttempts; i++) {
+      await this._fetchMoreIfNeeded();
+      if (this.list.length === 0) {
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+      const entry = this.list[this.listIndex++];
+      const proxyUrl = entry.proxyUrl;
+      if (!proxyUrl || this.failed.has(proxyUrl)) continue;
+
+      const agent = buildProxyAgent(proxyUrl);
+      if (!agent) { this.failed.add(proxyUrl); continue; }
+
+      const ip = await this._testProxyConnectivity(proxyUrl, agent);
+      if (!ip) { this.failed.add(proxyUrl); continue; }
+
+      const detectedCountry = await this._detectProxyCountry(agent);
+      const countryLabel = detectedCountry || entry.listCountry || entry.country || 'unknown';
+
+      console.log(`[ProxyRotator] Trying proxy ${proxyUrl.replace(/\/\/[^@]*@/, '//***@')} (${countryLabel}, ip ${ip}) for ${model}...`);
+      const test = await this._testCodebuffSession(token, agent, model);
+      if (test.ok && this._isAllowedProxyCountry(test.countryCode)) {
+        const okCountry = test.countryCode || countryLabel;
+        console.log(`[ProxyRotator] Working proxy found for ${model}: ${proxyUrl.replace(/\/\/[^@]*@/, '//***@')} -> ${okCountry}, tier ${test.accessTier || 'normal'}`);
+        return { url: proxyUrl, agent, country: okCountry };
+      }
+
+      let failReason = test.ok && !this._isAllowedProxyCountry(test.countryCode)
+        ? `country ${test.countryCode || 'unknown'} not allowed`
+        : null;
+
+      if (!test.ok && test.status === 'model_locked' && test.currentModel) {
+        failReason = `model_locked to ${test.currentModel}`;
+        // free proxy test creates a session but cannot start the requested model; try the locked model instead
+        const lockedTest = await this._testCodebuffSession(token, agent, test.currentModel);
+        if (lockedTest.ok && this._isAllowedProxyCountry(lockedTest.countryCode)) {
+          const okCountry = lockedTest.countryCode || countryLabel;
+          console.log(`[ProxyRotator] Working proxy found (locked model ${test.currentModel}) for ${model}: ${proxyUrl.replace(/\/\/[^@]*@/, '//***@')} -> ${okCountry}, tier ${lockedTest.accessTier || 'normal'}`);
+          return { url: proxyUrl, agent, country: okCountry, lockedModel: test.currentModel };
+        }
+      }
+
+      const rawPreview = test.raw ? (' | ' + test.raw.substring(0, 200)) : '';
+      console.log(`[ProxyRotator] Proxy ${proxyUrl.replace(/\/\/[^@]*@/, '//***@')} failed Codebuff test [status=${test.status || 'n/a'} tier=${test.accessTier || 'n/a'} block=${test.countryBlockReason || 'n/a'} err=${test.error || 'n/a'}${failReason ? ' ' + failReason : ''}]${rawPreview}`);
+      // Clean up the session we just created so it doesn't supersede the real one
+      await this._endAllUpstreamSessions(token, agent);
+      this.failed.add(proxyUrl);
+    }
+    return null;
+  }
+
+  async getWorkingProxy(token, model) {
+    if (!this.cfg.proxyRotator) return null;
+    const key = this._cacheKey(token, model);
+    const cached = this.cache.get(key);
+    if (cached && cached.agent) {
+      // verify cached proxy connectivity without creating a new upstream session
+      const ip = await this._testProxyConnectivity(cached.url, cached.agent);
+      if (ip) {
+        console.log(`[ProxyRotator] Reusing cached proxy for ${key}: ${cached.url.replace(/\/\/[^@]*@/, '//***@')} (${cached.country || 'unknown'})`);
+        return cached.agent;
+      }
+      console.log(`[ProxyRotator] Cached proxy no longer connects for ${key}, rotating...`);
+      this.cache.delete(key);
+      this.failed.add(cached.url);
+    }
+    const found = await this._tryNextProxy(token, model);
+    if (!found) {
+      console.log(`[ProxyRotator] No working proxy found for ${model} after rotation`);
+      return null;
+    }
+    this.cache.set(key, found);
+    return found.agent;
+  }
+
+  invalidate(token, model) {
+    const key = this._cacheKey(token, model);
+    const cached = this.cache.get(key);
+    if (cached) {
+      this.failed.add(cached.url);
+      this.cache.delete(key);
+    }
+  }
+}
+
+let proxyRotator = null;
 let outboundProxyAgent = null;
 function getOutboundProxyAgent() {
   if (outboundProxyAgent) return outboundProxyAgent;
@@ -1110,7 +1224,7 @@ class UpstreamClient {
     try {
       const fetchOpts = { method, headers, body: body || undefined, signal: controller.signal };
       if (proxyAgent) fetchOpts.dispatcher = proxyAgent;
-      const resp = await (proxyAgent ? undiciFetch : fetch)(requestURL, fetchOpts);
+      const resp = await fetch(requestURL, fetchOpts);
       clearTimeout(timer);
       const data = await resp.text();
       console.log(`[DEBUG] Session ${method} response (${resp.status}): ${data.substring(0, 300)}`);
@@ -1179,6 +1293,32 @@ class UpstreamClient {
   }
 }
 
+// --- Proxy triggering logic ---
+function needsProxyRotation(state) {
+  if (!state) return false;
+  if (state.countryBlockReason === 'country_not_allowed' || String(state.countryBlockReason || '').includes('country_not_allowed')) return true;
+  if (state.accessTier === 'limited') return true;
+  if ((state.error || '').includes('country_not_allowed')) return true;
+  return false;
+}
+
+async function ensureRotatedProxy(token, model, label = '') {
+  if (!config || !config.proxyRotator || !proxyRotator) return null;
+  console.log(`[ProxyRotator] Country limited${label ? ' ' + label : ''}, fetching rotated proxy...`);
+  return await proxyRotator.getWorkingProxy(token, model);
+}
+
+function copyCachedProxyForModel(token, fromModel, toModel) {
+  if (!proxyRotator) return;
+  const fromKey = `${token.substring(0, 12)}:${fromModel}`;
+  const toKey = `${token.substring(0, 12)}:${toModel}`;
+  const cached = proxyRotator.cache.get(fromKey);
+  if (cached) {
+    proxyRotator.cache.set(toKey, cached);
+    console.log(`[ProxyRotator] Copied cached proxy from ${fromModel} to ${toModel}`);
+  }
+}
+
 // --- Token Pool (sessions keyed by token:sessionModel) ---
 class TokenPool {
   constructor(tokens, cfg, client) {
@@ -1188,6 +1328,7 @@ class TokenPool {
     this.currentIndex = 0;
     this.sessions = new Map();
     this.lockedModels = new Map();
+    this.proxySessions = new Set();
     this.mutex = Promise.resolve();
   }
 
@@ -1209,6 +1350,27 @@ class TokenPool {
 
   sessionKey(token, model) { return `${token}:${model}`; }
 
+  async _getSessionProxyAgent(token, model, force = false) {
+    const key = this.sessionKey(token, model);
+    if (!proxyRotator) return null;
+    if (force && config.proxyRotator) {
+      await this.withLock(async () => { this.proxySessions.add(key); });
+      return await proxyRotator.getWorkingProxy(token, model);
+    }
+    if (!this.proxySessions.has(key)) return null;
+    return await proxyRotator.getWorkingProxy(token, model);
+  }
+
+  _sessionFromState(state, viaProxy = false) {
+    const instanceID = (state.instanceId || '').trim();
+    const expiresAt = state.expiresAt ? new Date(state.expiresAt) : null;
+    const countryCode = state.countryCode || null;
+    const remainingMs = state.remainingMs || null;
+    const accessTier = state.accessTier || null;
+    const countryBlockReason = state.countryBlockReason || null;
+    return { status: 'active', instanceID, expiresAt, countryCode, remainingMs, accessTier, countryBlockReason, viaProxy };
+  }
+
   async ensureSession(token, model) {
     const requestedModel = model;
     const locked = await this.withLock(async () => this.lockedModels.get(token));
@@ -1226,69 +1388,81 @@ class TokenPool {
         if (!session) return { ready: false };
         if (session.status === 'active' && session.instanceID) {
           if (!session.expiresAt || Date.now() < session.expiresAt.getTime() - 5000) {
-            return { ready: true, instanceID: session.instanceID };
+            return { ready: true, instanceID: session.instanceID, viaProxy: session.viaProxy || false };
           }
         }
         return { ready: false };
       });
-      if (ready.ready) return { instanceID: ready.instanceID, model };
+      if (ready.ready) return { instanceID: ready.instanceID, model, viaProxy: ready.viaProxy };
 
       try {
         let state;
+        let proxyAgent = await this._getSessionProxyAgent(token, model);
         const current = await this.withLock(async () => this.sessions.get(key));
         if (current && current.status === 'active' && current.instanceID) {
-          try { state = await this.client.getSession(token, current.instanceID); } catch (e) { 
+          try { state = await this.client.getSession(token, current.instanceID, proxyAgent); } catch (e) {
             if (e.message === 'freebuff_update_required') throw e;
-            state = await this.client.createSession(token, model); 
+            state = await this.client.createSession(token, model, proxyAgent);
           }
         } else {
-          state = await this.client.createSession(token, model);
+          state = await this.client.createSession(token, model, proxyAgent);
         }
-        state = await this.pollUntilReady(token, model, state);
-        console.log(`[DEBUG] ensureSession: pollUntilReady result: status=${state.status}, instanceId=${state.instanceId}`);
+        state = await this.pollUntilReady(token, model, state, proxyAgent);
+        console.log(`[DEBUG] ensureSession: pollUntilReady result: status=${state.status}, instanceId=${state.instanceId}, countryBlockReason=${state.countryBlockReason || 'none'}, accessTier=${state.accessTier || 'none'}`);
+
+        if (needsProxyRotation(state) && config.proxyRotator) {
+          const reason = state.countryBlockReason || state.accessTier || 'limited';
+          console.log(`[Proxy] Session flagged: ${reason}${state.countryCode ? ` (country ${state.countryCode})` : ''}, recreating via rotated proxy`);
+          try {
+            if (state.instanceID) await this.client.endSession(token, state.instanceID).catch(() => {});
+          } catch (_) {}
+          const rotatedAgent = await ensureRotatedProxy(token, model, reason);
+          if (rotatedAgent) {
+            await this.withLock(async () => { this.proxySessions.add(key); });
+            state = await this.client.createSession(token, model, rotatedAgent);
+            state = await this.pollUntilReady(token, model, state, rotatedAgent);
+            console.log(`[DEBUG] ensureSession: proxy pollUntilReady result: status=${state.status}, instanceId=${state.instanceId}, accessTier=${state.accessTier || 'none'}`);
+          }
+        }
+
         const instanceID = (state.instanceId || '').trim();
         if (!instanceID) throw new Error('free session active response missing instanceId');
-        const expiresAt = state.expiresAt ? new Date(state.expiresAt) : null;
-        const countryCode = state.countryCode || null;
-        const remainingMs = state.remainingMs || null;
-        const accessTier = state.accessTier || null;
-        await this.withLock(async () => {
-          this.sessions.set(key, { status: 'active', instanceID, expiresAt, countryCode, remainingMs, accessTier });
-        });
-        console.log(`[DEBUG] ensureSession: returning instanceID=${instanceID} model=${model} accessTier=${accessTier}`);
-        return { instanceID, model, accessTier };
+        const viaProxy = await this.withLock(async () => this.proxySessions.has(key));
+        const session = this._sessionFromState(state, viaProxy);
+        await this.withLock(async () => { this.sessions.set(key, session); });
+        console.log(`[DEBUG] ensureSession: returning instanceID=${instanceID} model=${model} accessTier=${session.accessTier} viaProxy=${viaProxy}`);
+        return { instanceID, model, accessTier: session.accessTier, viaProxy };
       } catch (e) {
         const errorMsg = e.message || '';
         if (errorMsg.includes('model_locked')) {
           let lockedModel = null;
           try { const parsed = JSON.parse(errorMsg); if (parsed.type === 'model_locked' && parsed.body && parsed.body.currentModel) lockedModel = parsed.body.currentModel; } catch (_) {}
           if (lockedModel) {
-            console.log(`${key.substring(0, 20)}...: server locked to ${lockedModel}, attempting to unlock and retry ${requestedModel}`);
+            console.log(`${key.substring(0, 20)}...: server locked to ${lockedModel}, switching to locked model without changing proxy`);
             await this.endAllSessionsForToken(token);
             try { await this.client.endSession(token); } catch (_) {}
             try {
-              const unlockedState = await this.client.createSession(token, requestedModel);
-              const polled = await this.pollUntilReady(token, requestedModel, unlockedState);
+              const proxyAgent = await this._getSessionProxyAgent(token, requestedModel);
+              const lockedState = await this.client.createSession(token, lockedModel, proxyAgent);
+              const polled = await this.pollUntilReady(token, lockedModel, lockedState, proxyAgent);
               const instanceID = (polled.instanceId || '').trim();
               if (instanceID) {
+                const newKey = this.sessionKey(token, lockedModel);
+                await this.withLock(async () => { this.proxySessions.delete(key); this.proxySessions.add(newKey); });
+                copyCachedProxyForModel(token, requestedModel, lockedModel);
+                const viaProxy = await this.withLock(async () => this.proxySessions.has(newKey));
+                const session = this._sessionFromState(polled, viaProxy);
                 await this.withLock(async () => {
                   this.sessions.delete(key);
-                  this.lockedModels.delete(token);
+                  this.lockedModels.set(token, lockedModel);
+                  this.sessions.set(newKey, session);
                 });
-                const expiresAt = polled.expiresAt ? new Date(polled.expiresAt) : null;
-                const countryCode = polled.countryCode || null;
-                const remainingMs = polled.remainingMs || null;
-                const accessTier = polled.accessTier || null;
-                await this.withLock(async () => {
-                  this.sessions.set(this.sessionKey(token, requestedModel), { status: 'active', instanceID, expiresAt, countryCode, remainingMs, accessTier });
-                });
-                console.log(`[DEBUG] ensureSession: unlock succeeded, returning ${requestedModel} instanceID=${instanceID}`);
-                return { instanceID, model: requestedModel, accessTier };
+                console.log(`[DEBUG] ensureSession: switched to locked model ${lockedModel} instanceID=${instanceID} viaProxy=${viaProxy}`);
+                return { instanceID, model: lockedModel, accessTier: session.accessTier, viaProxy };
               }
-            } catch (unlockErr) {
-              console.log(`${key.substring(0, 20)}...: unlock+retry failed (${unlockErr.message}), falling back to locked model ${lockedModel}`);
+            } catch (switchErr) {
+              console.error(`${key.substring(0, 20)}...: failed to switch to locked model ${lockedModel} (${switchErr.message}), retrying`);
             }
-            console.log(`${key.substring(0, 20)}...: falling back to locked model ${lockedModel}`);
             const newKey = this.sessionKey(token, lockedModel);
             await this.withLock(async () => { this.sessions.delete(key); this.lockedModels.set(token, lockedModel); });
             model = lockedModel;
@@ -1344,7 +1518,7 @@ class TokenPool {
     }
   }
 
-  async pollUntilReady(token, model, state) {
+  async pollUntilReady(token, model, state, proxyAgent = null) {
     for (let i = 0; i < 60; i++) {
       const status = (state.status || '').trim();
       if (status === 'active') return state;
@@ -1355,9 +1529,9 @@ class TokenPool {
         const delay = estimatedWaitMs > 0 ? Math.min(Math.max(estimatedWaitMs, 250), 2000) : 250;
         console.log(`Waiting room: position ${state.position || '?'}/${state.queueDepth || '?'}${estimatedWaitMs > 0 ? `, ~${Math.ceil(estimatedWaitMs / 1000)}s` : ''}`);
         await new Promise(r => setTimeout(r, delay));
-        state = await this.client.getSession(token, instanceID);
+        state = await this.client.getSession(token, instanceID, proxyAgent);
       } else if (status === 'ended' || status === 'superseded' || status === 'none') {
-        state = await this.client.createSession(token, model);
+        state = await this.client.createSession(token, model, proxyAgent);
       } else if (status === 'disabled') {
         return state;
       } else {
@@ -1616,6 +1790,9 @@ async function handleHealthz(req, res) {
       session_expires_at: bestSession?.expiresAt || null,
       country_code: bestSession?.countryCode || DETECTED_COUNTRY || null,
       access_tier: bestSession?.accessTier || null,
+      country_block_reason: bestSession?.countryBlockReason || null,
+      via_proxy: bestSession?.viaProxy || false,
+      proxy_url: proxyRotator ? proxyRotator.cache.get(bestSession ? `${token.substring(0, 12)}:${bestSession.model || ''}` : '')?.url?.replace(/\/\/[^@]*@/, '//***@') : null,
       remaining_ms: bestSession?.remainingMs || null,
       runs: []
     };
@@ -1628,11 +1805,11 @@ async function handleHealthz(req, res) {
     valid_tokens: tokenPool.tokens.length,
     runtime: IS_BUN ? 'bun' : 'node',
     runtime_version: RUNTIME_VERSION,
-    opera_proxy: {
-      enabled: config.warpPlus,
-      running: warpPlus.isReady(),
-      port: WARP_PLUS_PORT,
-      exit_country: (warpPlus.isReady() || warpPlus.lastEndpoint) ? 'US' : null
+    proxy_rotator: {
+      enabled: config.proxyRotator,
+      countries: config.proxiflyCountries,
+      cached_proxies: proxyRotator ? proxyRotator.cache.size : 0,
+      failed_pool: proxyRotator ? proxyRotator.failed.size : 0
     },
     outbound_proxy: config.outboundProxy ? config.outboundProxy.replace(/\/\/[^@]*@/, '//***@') : null
   });
@@ -1705,11 +1882,13 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     let sessionInstanceID;
     let actualModel = currentModel;
     let accessTier = null;
+    let viaProxy = false;
     try {
       const session = await tokenPool.ensureSession(token, currentModel);
       sessionInstanceID = session.instanceID;
       actualModel = session.model;
       accessTier = session.accessTier;
+      viaProxy = session.viaProxy || false;
     } catch (e) {
       writeError(res, 502, `failed to acquire upstream free session: ${e.message}`, 'server_error', '');
       return;
@@ -1727,24 +1906,10 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     }
 
     let proxyAgent = null;
-    if (accessTier === 'limited' && config.warpPlus) {
-      if (!warpPlus.isReady()) {
-        console.log('[Proxy] Limit detected, starting Warp Plus...');
-        const started = await warpPlus.start();
-        if (!started) {
-          console.log('[Proxy] Warp Plus failed to start, falling back to direct connection');
-        }
-      }
-      if (warpPlus.isReady()) {
-        try {
-          await nodeFetch('https://api.ipify.org?format=json', { agent: warpPlus.getAgent(), signal: AbortSignal.timeout(5000) });
-          proxyAgent = warpPlus.getAgent();
-          console.log('[Proxy] Routing chat through Warp Plus');
-        } catch (e) {
-          console.log(`[Proxy] Warp Plus connectivity test failed (${e.message}), falling back to direct connection`);
-          warpPlus.stop();
-        }
-      }
+    const needsChatProxy = viaProxy || accessTier === 'limited';
+    if (needsChatProxy && config.proxyRotator) {
+      proxyAgent = await ensureRotatedProxy(token, currentModel, viaProxy ? 'via session' : 'limited tier');
+      if (proxyAgent) console.log('[Proxy] Routing chat through rotated proxy');
     }
     if (!proxyAgent) {
       proxyAgent = getOutboundProxyAgent();
@@ -1752,7 +1917,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     }
 
     const requestedDisplay = actualModel !== requestedModel ? ` (locked from ${requestedModel})` : '';
-    console.log(`[Request] model: ${actualModel}${requestedDisplay}, run: ${run.runId}, tier: ${accessTier || 'normal'}${proxyAgent ? ', via warp' : ''}`);
+    console.log(`[Request] model: ${actualModel}${requestedDisplay}, run: ${run.runId}, tier: ${accessTier || 'normal'}${proxyAgent ? ', via proxy' : ''}`);
     const userMsg = (payload.messages || []).find(m => m.role === 'user');
     if (userMsg) console.log(`[Prompt] ${typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content)}`);
 
@@ -2074,7 +2239,13 @@ function writeClaudePassthroughError(res, statusCode, body) {
 async function validateToken(token) {
   try {
     const client = new UpstreamClient(config);
-    const session = await client.createSession(token);
+    let session = await client.createSession(token);
+    if (session && needsProxyRotation(session) && config.proxyRotator && proxyRotator) {
+      const proxy = await proxyRotator.getWorkingProxy(token, '');
+      if (proxy) {
+        session = await client.createSession(token, '', proxy);
+      }
+    }
     return session && session.status === 'active';
   } catch (e) {
     let lockedModel = null;
@@ -2109,6 +2280,7 @@ async function validateAllTokens() {
 async function reloadTokenPool() {
   config = loadConfig();
   const client = new UpstreamClient(config);
+  proxyRotator = config.proxyRotator ? new ProxyRotator(config) : null;
   tokenPool = new TokenPool(config.authTokens, config, client);
   console.log(`TokenPool reloaded with ${config.authTokens.length} token(s)`);
 }
@@ -2274,18 +2446,21 @@ async function startServer() {
   await checkAndUpdateVersions();
   await checkProxyVersion();
 
-  detectCountry().catch(() => {});
+  await detectCountry();
 
   modelRegistry = new ModelRegistry();
   await modelRegistry.start();
 
   const firstRun = await setupOpencodeConfig();
 
+  proxyRotator = config.proxyRotator ? new ProxyRotator(config) : null;
+
   const allTokenResults = await validateAllTokens();
   const validTokens = allTokenResults.filter(r => r.valid);
   const port = parseInt(config.listenAddr.replace(':', '')) || 8080;
 
   const client = new UpstreamClient(config);
+
   const tokensToUse = validTokens.length > 0
     ? validTokens.map(t => {
         const masked = t.token;
@@ -2305,7 +2480,7 @@ async function startServer() {
     console.log(`  Models: ${modelRegistry.getModels().length}`);
     console.log(`  API keys: ${config.apiKeys.length > 0 ? config.apiKeys.length + ' (auth enabled)' : 'none (open access)'}`);
     console.log(`  Valid tokens: ${validTokens.length}`);
-    console.log(`  Warp Plus: ${config.warpPlus ? 'enabled (auto-start on limit)' : 'disabled'}`);
+    console.log(`  Proxy Rotator: ${config.proxyRotator ? 'enabled (' + config.proxiflyCountries.join(',') + ')' : 'disabled'}`);
     if (config.outboundProxy) console.log(`  Outbound Proxy: ${config.outboundProxy.replace(/\/\/[^@]*@/, '//***@')}`);
     console.log('');
     if (firstRun) {
