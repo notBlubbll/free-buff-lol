@@ -19,25 +19,33 @@ echo  http://localhost:%PORT%
 echo ==================================================
 echo.
 
-echo [1/3] Cleaning up...
+echo [1/5] Cleaning up...
 :: Kill only whatever is currently listening on the configured port.
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%PORT% " ^| findstr "LISTENING"') do (
     taskkill /PID %%a /F >nul 2>&1
 )
 timeout /t 1 /nobreak >nul
 
-echo [2/3] Detecting Node.js...
+echo [2/5] Detecting Node.js...
 where node >nul 2>&1
 if %ERRORLEVEL% neq 0 goto :no_runtime
 
 echo [INFO] Runtime: Node.js
 
-echo [3/4] Installing dependencies...
-npm install --production
+echo [3/5] Installing dependencies...
+call npm install --omit=dev
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] npm install failed. Try running 'npm install' manually.
+    @if not defined OPENCODE_ATTACH timeout /t 10
+    exit /b %ERRORLEVEL%
+)
 if exist "bun.lock" del /F /Q "bun.lock" >nul 2>&1
 if exist "package-lock.json" del /F /Q "package-lock.json" >nul 2>&1
 
-echo [4/4] Starting proxy...
+echo [4/5] Ensuring config directory...
+if not exist ".config" mkdir ".config"
+
+echo [5/5] Starting proxy...
 echo.
 echo ==================================================
 echo  Proxy: http://127.0.0.1:%PORT%

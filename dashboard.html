@@ -1037,12 +1037,12 @@
       document.getElementById('startedAt').textContent = new Date(proxyData.started_at).toLocaleString();
       document.getElementById('tokenCountBadge').textContent = proxyData.token_state.length;
       const bestToken = proxyData.token_state.find(t => t.country_code) || proxyData.token_state[0];
-      const cc = bestToken?.country_code || proxyData.proxy_rotator?.proxy_country || '-';
+      const cc = bestToken?.country_code || proxyData.opera_proxy?.country || '-';
       const tier = bestToken?.access_tier || '';
       const el = document.getElementById('countryCode');
       el.textContent = cc;
       // Show proxy exit country in gray when routing through rotated proxy
-      const proxyCountry = bestToken?.proxy_country || proxyData.proxy_rotator?.proxy_country;
+      const proxyCountry = proxyData.opera_proxy?.country || null;
       if (proxyCountry && proxyCountry !== cc) {
         const small = document.createElement('small');
         small.textContent = '>' + proxyCountry;
@@ -1073,15 +1073,12 @@
       }
       if (proxyData.opera_proxy) {
         const el = document.getElementById('operaProxyStatus');
-        if (!proxyData.opera_proxy.enabled) {
-          el.textContent = 'Disabled';
-          el.style.color = '#888';
-        } else if (proxyData.opera_proxy.running) {
-          el.textContent = 'Running';
-          el.style.color = '#4caf50';
+        if (!proxyData.opera_proxy.ready) {
+          el.textContent = 'Offline';
+          el.style.color = '#f44336';
         } else {
-          el.textContent = 'Ready';
-          el.style.color = '#ff9800';
+          el.textContent = `Active (${proxyData.opera_proxy.country})`;
+          el.style.color = '#4caf50';
         }
       }
     }

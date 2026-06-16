@@ -23,7 +23,7 @@
     "node-fetch": "^2.7.0",
     "node-forge": "^1.4.0",
     "socks": "^2.8.9",
-    "socks-proxy-agent": "^10.0.0",
+    "socks-proxy-agent": "^8.0.0",
     "undici": "^8.3.0"
   }
 }
