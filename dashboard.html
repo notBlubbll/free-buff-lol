@@ -480,10 +480,6 @@
                 <div class="fw-medium" id="runtimeInfo">-</div>
               </div>
               <div class="mb-2">
-                <small class="text-muted">Warp Plus</small>
-                <div class="fw-medium" id="operaProxyStatus">-</div>
-              </div>
-              <div class="mb-2">
                 <small class="text-muted">Started At</small>
                 <div class="fw-medium" id="startedAt">-</div>
               </div>
@@ -1037,21 +1033,11 @@
       document.getElementById('startedAt').textContent = new Date(proxyData.started_at).toLocaleString();
       document.getElementById('tokenCountBadge').textContent = proxyData.token_state.length;
       const bestToken = proxyData.token_state.find(t => t.country_code) || proxyData.token_state[0];
-      const cc = bestToken?.country_code || proxyData.opera_proxy?.country || '-';
+      const cc = bestToken?.country_code || '-';
       const tier = bestToken?.access_tier || '';
       const el = document.getElementById('countryCode');
       el.textContent = cc;
-      // Show proxy exit country in gray when routing through rotated proxy
-      const proxyCountry = proxyData.opera_proxy?.country || null;
-      if (proxyCountry && proxyCountry !== cc) {
-        const small = document.createElement('small');
-        small.textContent = '>' + proxyCountry;
-        small.style.marginLeft = '4px';
-        small.style.opacity = '0.55';
-        small.style.color = '#b0c4de';
-        small.style.fontWeight = '500';
-        el.appendChild(small);
-      } else if (tier === 'limited') {
+      if (tier === 'limited') {
         const small = document.createElement('small');
         small.textContent = '(limit)';
         small.style.marginLeft = '4px';
@@ -1070,16 +1056,6 @@
       updateRemainingDisplay();
       if (proxyData.runtime) {
         document.getElementById('runtimeInfo').textContent = proxyData.runtime + ' v' + proxyData.runtime_version;
-      }
-      if (proxyData.opera_proxy) {
-        const el = document.getElementById('operaProxyStatus');
-        if (!proxyData.opera_proxy.ready) {
-          el.textContent = 'Offline';
-          el.style.color = '#f44336';
-        } else {
-          el.textContent = `Active (${proxyData.opera_proxy.country})`;
-          el.style.color = '#4caf50';
-        }
       }
     }
 
