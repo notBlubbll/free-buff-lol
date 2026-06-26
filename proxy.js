@@ -48,6 +48,8 @@ const CANONICAL_MODEL_ALIASES = {
   'minimax-m2.7': 'minimax/minimax-m2.7',
   'minimax-m3': 'minimax/minimax-m3',
   'gemini-3.1-flash-lite': 'google/gemini-3.1-flash-lite-preview',
+  'gemini-3.1-pro': 'google/gemini-3.1-pro-preview',
+  'gemini-pro': 'google/gemini-3.1-pro-preview',
 };
 
 const FALLBACK_AGENT_IDS = {
@@ -60,7 +62,14 @@ const FALLBACK_AGENT_IDS = {
   'mimo/mimo-v2.5': 'base2-free-mimo',
   'google/gemini-2.5-flash-lite': 'base2-free-deepseek-flash',
   'google/gemini-3.1-flash-lite-preview': 'base2-free-deepseek-flash',
-  'google/gemini-3.1-pro-preview': 'base2-free-kimi',
+  'google/gemini-3.1-pro-preview': 'base2-free-deepseek-flash',
+};
+
+const GEMINI_PARENT_AGENT_ID = 'base2-free-deepseek-flash';
+const GEMINI_SUBAGENT_IDS = {
+  'google/gemini-2.5-flash-lite': 'file-picker',
+  'google/gemini-3.1-flash-lite-preview': 'basher',
+  'google/gemini-3.1-pro-preview': 'thinker-with-files-gemini',
 };
 
 const CONTEXT_PRUNER_AGENT_ID = 'context-pruner';
@@ -527,7 +536,8 @@ class ModelRegistry {
       { model: 'deepseek/deepseek-v4-flash', agent: 'base2-free-deepseek-flash', displayName: 'DeepSeek V4 Flash', premium: false, multimodal: false, free: true },
       { model: 'mimo/mimo-v2.5', agent: 'base2-free-mimo', displayName: 'MiMo 2.5', premium: false, multimodal: true, free: true },
       { model: 'minimax/minimax-m2.7', agent: 'base2-free', displayName: 'MiniMax M2.7', premium: false, multimodal: false, free: true },
-      { model: 'google/gemini-3.1-flash-lite-preview', agent: 'base2-free-deepseek-flash', displayName: 'Gemini 3.1 Flash Lite', premium: false, multimodal: false, free: true },
+      { model: 'google/gemini-3.1-flash-lite-preview', agent: 'basher', displayName: 'Gemini 3.1 Flash Lite', premium: false, multimodal: false, free: true },
+      { model: 'google/gemini-3.1-pro-preview', agent: 'thinker-with-files-gemini', displayName: 'Gemini 3.1 Pro', premium: true, multimodal: false, free: true },
     ];
 
     let loaded = false;
@@ -549,6 +559,14 @@ class ModelRegistry {
         for (const model of models) {
           if (!rootAgentMapping.has(model)) rootAgentMapping.set(model, agent);
         }
+      }
+      const GEMINI_FALLBACK_ENTRIES = [
+        ['google/gemini-3.1-flash-lite-preview', 'basher'],
+        ['google/gemini-3.1-pro-preview', 'thinker-with-files-gemini'],
+        ['google/gemini-2.5-flash-lite', 'file-picker'],
+      ];
+      for (const [model, agent] of GEMINI_FALLBACK_ENTRIES) {
+        if (!rootAgentMapping.has(model)) rootAgentMapping.set(model, agent);
       }
       const parsedMetadata = this.parseModelMetadata(modelsSource, variableMap);
 
@@ -658,12 +676,12 @@ class ModelRegistry {
   }
 
   parseAllFreeModels(source, variableMap) {
-    const blockPattern = /'([^']+)':\s*new\s+Set\(\[([^\]]*)\]\)/g;
+    const blockPattern = /(?:'([^']+)'|(\w+)|\[([^\]]+)\])\s*:\s*new\s+Set\(\[([^\]]*)\]\)/g;
     const result = new Map();
     let match;
     while ((match = blockPattern.exec(source)) !== null) {
-      const agentID = match[1];
-      const modelsStr = match[2];
+      const agentID = match[1] || match[2] || (variableMap.get(match[3]) || match[3]);
+      const modelsStr = match[4];
       const models = [];
       const tokenPattern = /(?:'([^']+)')|(\w+)/g;
       let tokenMatch;
@@ -1087,7 +1105,8 @@ class TokenPool {
     const remainingMs = state.remainingMs || null;
     const accessTier = state.accessTier || null;
     const countryBlockReason = state.countryBlockReason || null;
-    return { status: 'active', instanceID, expiresAt, countryCode, remainingMs, accessTier, countryBlockReason };
+    const model = state.model || null;
+    return { status: 'active', instanceID, expiresAt, countryCode, remainingMs, accessTier, countryBlockReason, model };
   }
 
   async ensureSession(token, model) {
@@ -1107,12 +1126,12 @@ class TokenPool {
         if (!session) return { ready: false };
         if (session.status === 'active' && session.instanceID) {
           if (!session.expiresAt || Date.now() < session.expiresAt.getTime() - 5000) {
-            return { ready: true, instanceID: session.instanceID };
+            return { ready: true, instanceID: session.instanceID, model: session.model || model, accessTier: session.accessTier };
           }
         }
         return { ready: false };
       });
-      if (ready.ready) return { instanceID: ready.instanceID, model };
+      if (ready.ready) return { instanceID: ready.instanceID, model: ready.model, accessTier: ready.accessTier };
 
       try {
         let state;
@@ -1131,9 +1150,19 @@ class TokenPool {
         const instanceID = (state.instanceId || '').trim();
         if (!instanceID) throw new Error('free session active response missing instanceId');
         const session = this._sessionFromState(state);
-        await this.withLock(async () => { this.sessions.set(key, session); });
-        console.log(`[DEBUG] ensureSession: returning instanceID=${instanceID} model=${model} accessTier=${session.accessTier}`);
-        return { instanceID, model, accessTier: session.accessTier };
+        const boundModel = session.model;
+        let returnModel = model;
+        if (boundModel && boundModel !== requestedModel) {
+          console.log(`${key.substring(0, 20)}...: server bound session to ${boundModel} (requested ${requestedModel}), accepting bound model`);
+          await this.withLock(async () => { this.lockedModels.set(token, boundModel); });
+          const boundKey = this.sessionKey(token, boundModel);
+          await this.withLock(async () => { this.sessions.delete(key); this.sessions.set(boundKey, session); });
+          returnModel = boundModel;
+        } else {
+          await this.withLock(async () => { this.sessions.set(key, session); });
+        }
+        console.log(`[DEBUG] ensureSession: returning instanceID=${instanceID} model=${returnModel} accessTier=${session.accessTier}`);
+        return { instanceID, model: returnModel, accessTier: session.accessTier };
       } catch (e) {
         const errorMsg = e.message || '';
         if (errorMsg.includes('model_locked')) {
@@ -1192,6 +1221,37 @@ class TokenPool {
 
   async setLockedModel(token, model) {
     await this.withLock(async () => { this.lockedModels.set(token, model); });
+  }
+
+  async clearLockedModel(token) {
+    const result = await this.withLock(async () => {
+      const locked = this.lockedModels.get(token) || null;
+      this.lockedModels.delete(token);
+      return locked;
+    });
+    if (result) {
+      await this.endAllSessionsForToken(token);
+      try { await this.client.endSession(token); } catch (e) { console.error(`endSession(no-id) failed: ${e.message}`); }
+    }
+    return result;
+  }
+
+  async clearAllLockedModels() {
+    const all = [];
+    const tokens = this.tokens.slice();
+    for (const token of tokens) {
+      const locked = await this.withLock(async () => {
+        const m = this.lockedModels.get(token) || null;
+        this.lockedModels.delete(token);
+        return m;
+      });
+      if (locked) all.push({ token, lockedModel: locked });
+    }
+    for (const { token } of all) {
+      await this.endAllSessionsForToken(token);
+      try { await this.client.endSession(token); } catch (e) { console.error(`endSession(no-id) failed: ${e.message}`); }
+    }
+    return all;
   }
 
   async endAllSessionsForToken(token) {
@@ -1279,6 +1339,29 @@ async function finalizeRunChainGemini(client, token, run, messageId) {
     await client.recordRunStep(token, run.runId, 1, [run.chatRunId], null, run.startedAt);
     await client.finishRun(token, run.runId, 2);
   } catch (e) { console.error(`finalize gemini run failed: ${e.message}`); }
+}
+
+async function startRunChainSimple(client, token, agentID) {
+  const startedAt = new Date().toISOString();
+  const runId = await client.startRun(token, agentID, []);
+  return { runId, agentId: agentID, startedAt };
+}
+
+async function finalizeRunChainSimple(client, token, run, messageId) {
+  try {
+    await client.recordRunStep(token, run.runId, 1, [], messageId, run.startedAt);
+    await client.finishRun(token, run.runId, 2);
+  } catch (e) { console.error(`finalize simple run failed: ${e.message}`); }
+}
+
+function isGeminiModel(canonicalModel) {
+  return canonicalModel.startsWith('google/gemini-');
+}
+
+function getGeminiSubagentId(canonicalModel) {
+  if (GEMINI_SUBAGENT_IDS[canonicalModel]) return GEMINI_SUBAGENT_IDS[canonicalModel];
+  if (canonicalModel.includes('pro')) return 'thinker-with-files-gemini';
+  return 'basher';
 }
 
 // --- Utility ---
@@ -1421,7 +1504,7 @@ function isSessionInvalid(statusCode, errorBody) {
   try {
     const payload = JSON.parse(errorBody);
     const error = payload.error || payload.code || '';
-    const retryableErrors = ['freebuff_update_required', 'waiting_room_required', 'waiting_room_queued', 'session_superseded', 'session_expired', 'session_model_mismatch', 'free_mode_invalid_agent_hierarchy'];
+    const retryableErrors = ['freebuff_update_required', 'waiting_room_required', 'waiting_room_queued', 'session_superseded', 'session_expired', 'session_model_mismatch'];
     return retryableErrors.includes(error);
   } catch (e) { return false; }
 }
@@ -1480,6 +1563,7 @@ async function handleHealthz(req, res) {
       if (key.startsWith(token + ':')) allSessions.push(session);
     }
     const bestSession = allSessions.find(s => s.status === 'active') || allSessions[0] || null;
+    const lockedModel = tokenPool.lockedModels.get(token) || null;
     return {
       name: `token-${idx + 1}`,
       token: maskedToken,
@@ -1490,6 +1574,7 @@ async function handleHealthz(req, res) {
       access_tier: bestSession?.accessTier || null,
       country_block_reason: bestSession?.countryBlockReason || null,
       remaining_ms: bestSession?.remainingMs || null,
+      locked_model: lockedModel,
       runs: []
     };
   });
@@ -1499,6 +1584,7 @@ async function handleHealthz(req, res) {
     token_state: tokenState,
     models_count: modelRegistry.getModels().length,
     valid_tokens: tokenPool.tokens.length,
+    locked_tokens: tokenState.filter(t => t.locked_model).length,
     runtime: IS_BUN ? 'bun' : 'node',
     runtime_version: RUNTIME_VERSION
   });
@@ -1567,7 +1653,8 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
   try { await client.getStreak(token); } catch (_) {}
 
   let currentModel = requestedModel;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let mismatchUnlockAttempted = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
     let sessionInstanceID;
     let actualModel = currentModel;
     let accessTier = null;
@@ -1584,16 +1671,27 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     const canonicalModel = canonicalModelName(actualModel);
     const agentID = modelRegistry.getAgentForModel(canonicalModel) || FALLBACK_AGENT_IDS[canonicalModel] || 'base2-free';
 
+    const isGemini = isGeminiModel(canonicalModel);
+    let geminiSubagent = null;
+    let geminiParentAgent = null;
+
     let run;
     try {
-      run = await startRunChainNormal(client, token, agentID);
+      if (isGemini) {
+        geminiSubagent = getGeminiSubagentId(canonicalModel);
+        geminiParentAgent = GEMINI_PARENT_AGENT_ID;
+        run = await startRunChainGemini(client, token, geminiParentAgent, geminiSubagent);
+      } else {
+        run = await startRunChainNormal(client, token, agentID);
+      }
     } catch (e) {
       writeError(res, 502, `failed to start run chain: ${e.message}`, 'server_error', '');
       return;
     }
 
     const requestedDisplay = actualModel !== requestedModel ? ` (locked from ${requestedModel})` : '';
-    console.log(`[Request] model: ${actualModel}${requestedDisplay}, run: ${run.runId}, tier: ${accessTier || 'normal'}`);
+    const chatRunId = isGemini ? run.chatRunId : run.runId;
+    console.log(`[Request] model: ${actualModel}${requestedDisplay}, run: ${run.runId}${isGemini ? ` (child: ${chatRunId})` : ''}, tier: ${accessTier || 'normal'}`);
     const userMsg = (payload.messages || []).find(m => m.role === 'user');
     if (userMsg) console.log(`[Prompt] ${typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content)}`);
 
@@ -1613,7 +1711,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     cloned.codebuff_metadata = {
       freebuff_instance_id: sessionInstanceID,
       trace_session_id: traceSessionId,
-      run_id: run.runId,
+      run_id: chatRunId,
       client_id: clientId,
       cost_mode: 'free',
     };
@@ -1652,7 +1750,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
       let actualResponseModel = null;
       try { const result = await writeSuccess(res, resp); messageId = result.messageId; actualResponseModel = result.model; } catch (e) { console.error(`proxy response copy failed: ${e.message}`); }
       console.log(`[Response] model: ${actualResponseModel || actualModel}, completed in ${Date.now() - reqStart}ms (status: ${resp.status})`);
-      setImmediate(() => finalizeRunChainNormal(client, token, run, messageId));
+      setImmediate(() => isGemini ? finalizeRunChainGemini(client, token, run, messageId) : finalizeRunChainNormal(client, token, run, messageId));
       return;
     }
 
@@ -1667,6 +1765,10 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
         errorType = errorData.error || '';
         if (errorType === 'session_model_mismatch') {
           lockedModel = errorData.lockedModel || null;
+          if (!lockedModel && errorData.message) {
+            const match = errorData.message.match(/bound to ([a-zA-Z0-9][a-zA-Z0-9._/-]+)/);
+            if (match) lockedModel = match[1].replace(/;.*$/, '').replace(/\.$/, '');
+          }
           if (!lockedModel) {
             const cached = await tokenPool.getLockedModel(token);
             if (cached) lockedModel = cached;
@@ -1682,9 +1784,19 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
         console.log(`[Version] Server requires update, invalidating session and retrying...`);
       }
       tokenPool.invalidateSession(token, actualModel);
+      if (requestedModel !== actualModel) tokenPool.invalidateSession(token, requestedModel);
+
+      if (errorType === 'session_model_mismatch' && lockedModel && lockedModel !== requestedModel && !mismatchUnlockAttempted) {
+        mismatchUnlockAttempted = true;
+        console.log(`[Model Lock] Mismatch: session bound to ${lockedModel}. Ending session to unlock and retrying requested model ${requestedModel}`);
+        await tokenPool.clearLockedModel(token);
+        currentModel = requestedModel;
+        continue;
+      }
       if (lockedModel) {
         console.log(`[Model Lock] Switching from ${currentModel} to ${lockedModel}`);
         await tokenPool.setLockedModel(token, lockedModel);
+        tokenPool.invalidateSession(token, lockedModel);
         currentModel = lockedModel;
       }
       continue;
@@ -2052,6 +2164,18 @@ async function handleRequest(req, res) {
       const data = await resp.json();
       writeJSON(res, 200, data);
     } catch (e) { writeJSON(res, 200, { success: false, error: e.message }); }
+    return;
+  }
+
+  if (pathname === '/api/session/unlock' && req.method === 'POST') {
+    if (!tokenPool) { writeJSON(res, 503, { ok: false, error: 'token pool not ready' }); return; }
+    try {
+      const unlocked = await tokenPool.clearAllLockedModels();
+      console.log(`[Unlock] Cleared locked models for ${unlocked.length} token(s)`);
+      writeJSON(res, 200, { ok: true, unlocked_count: unlocked.length });
+    } catch (e) {
+      writeJSON(res, 500, { ok: false, error: e.message });
+    }
     return;
   }
 

@@ -209,6 +209,41 @@
       padding: 12px;
       margin-bottom: 10px;
     }
+    .pool-card.locked {
+      border: 1px dashed rgba(0, 0, 0, 0.8);
+      background: rgba(0, 0, 0, 0.1);
+    }
+    .locked-model-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 8px;
+      padding: 4px 10px;
+      border: 1px dashed rgba(0, 0, 0, 0.8);
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.15);
+      font-size: 0.78rem;
+      color: #000000;
+      font-weight: 600;
+    }
+    .locked-model-badge .lock-icon {
+      font-size: 0.85rem;
+    }
+    .unlock-btn {
+      margin-left: 8px;
+      padding: 2px 10px;
+      border: 1px solid rgba(0, 0, 0, 0.8);
+      border-radius: 5px;
+      background: rgba(0, 0, 0, 0.2);
+      color: #000000;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .unlock-btn:hover {
+      background: rgba(0, 0, 0, 0.35);
+    }
     .pool-header {
       display: flex;
       justify-content: space-between;
@@ -845,6 +880,8 @@
         const sessionStatus = pool.session_status || 'none';
         const statusClass = sessionStatus === 'active' ? 'status-online' : 'status-offline';
         const statusText = sessionStatus.charAt(0).toUpperCase() + sessionStatus.slice(1);
+        const lockedModel = pool.locked_model || null;
+        const cardClass = lockedModel ? 'pool-card locked' : 'pool-card';
         let runsHtml = '';
         if (pool.runs && pool.runs.length > 0) {
           runsHtml = pool.runs.map(run => `<div class="run-item"><span class="run-agent">${run.agent_id}</span><span class="${blurClass}">${run.run_id.substring(0, 8)}... | Inflight: ${run.inflight} | Requests: ${run.request_count}</span></div>`).join('');
@@ -853,8 +890,24 @@
         if (pool.session_instance_id) {
           sessionInfo = `<div style="margin-top:8px;font-size:0.8rem;color:#ffffff;" class="${blurClass}">Session: ${pool.session_instance_id.substring(0,12)}...${pool.session_expires_at ? ' | Expires: ' + new Date(pool.session_expires_at).toLocaleTimeString() : ''}</div>`;
         }
-        return `<div class="pool-card"><div class="pool-header"><div class="pool-name">${pool.name}</div><div class="pool-status ${statusClass}">${statusText}</div></div>${runsHtml}${sessionInfo}${pool.last_error ? `<div class="text-danger" style="margin-top:8px;font-size:0.8rem;">${pool.last_error}</div>` : ''}</div>`;
+        const lockedBadge = lockedModel ? `<div class="locked-model-badge"><i class="bi bi-lock-fill lock-icon"></i><span>Locked: ${escapeHtml(lockedModel)}</span><button class="unlock-btn" onclick="unlockSession()">Unlock</button></div>` : '';
+        return `<div class="${cardClass}"><div class="pool-header"><div class="pool-name">${pool.name}</div><div class="pool-status ${statusClass}">${statusText}</div></div>${runsHtml}${sessionInfo}${lockedBadge}${pool.last_error ? `<div class="text-danger" style="margin-top:8px;font-size:0.8rem;">${pool.last_error}</div>` : ''}</div>`;
       }).join('');
+    }
+
+    async function unlockSession() {
+      try {
+        const resp = await fetch('/api/session/unlock', { method: 'POST' });
+        const data = await resp.json();
+        if (data.ok) {
+          showToast(`Unlocked ${data.unlocked_count} session(s)`, 'success');
+          await checkHealth();
+        } else {
+          showToast(data.error || 'Unlock failed', 'danger');
+        }
+      } catch (e) {
+        showToast('Unlock failed: ' + e.message, 'danger');
+      }
     }
 
     function getModelDisplayName(model) {
