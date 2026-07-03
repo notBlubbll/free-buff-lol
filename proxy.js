@@ -203,7 +203,7 @@ function parseDuration(str) {
 function loadConfig() {
   const configPath = path.join(__dirname, '.config', 'config.json');
   let rawConfig = {
-    LISTEN_ADDR: ':8080',
+    LISTEN_ADDR: '127.0.0.1:8080',
     UPSTREAM_BASE_URL: 'https://www.codebuff.com',
     REQUEST_TIMEOUT: '15m'
   };
@@ -215,6 +215,7 @@ function loadConfig() {
   if (process.env.REQUEST_TIMEOUT) rawConfig.REQUEST_TIMEOUT = process.env.REQUEST_TIMEOUT;
   if (process.env.AUTH_TOKENS) rawConfig.AUTH_TOKENS = process.env.AUTH_TOKENS.split(',').map(t => t.trim()).filter(Boolean);
   if (process.env.API_KEYS) rawConfig.API_KEYS = process.env.API_KEYS.split(',').map(t => t.trim()).filter(Boolean);
+  if (process.env.DISABLE_AUTH) rawConfig.DISABLE_AUTH = process.env.DISABLE_AUTH === 'true' || process.env.DISABLE_AUTH === '1';
   if (process.env.ENABLED_MODELS) rawConfig.ENABLED_MODELS = process.env.ENABLED_MODELS.split(',').map(t => t.trim()).filter(Boolean);
   if (process.env.MOCK_COUNTRY) rawConfig.MOCK_COUNTRY = process.env.MOCK_COUNTRY.trim().toUpperCase();
   if (!rawConfig.AUTH_TOKENS || rawConfig.AUTH_TOKENS.length === 0) {
@@ -225,18 +226,33 @@ function loadConfig() {
   if (!rawConfig.LISTEN_ADDR) throw new Error('LISTEN_ADDR cannot be empty');
   if (!rawConfig.UPSTREAM_BASE_URL) throw new Error('UPSTREAM_BASE_URL cannot be empty');
   if (requestTimeout <= 0) throw new Error('REQUEST_TIMEOUT must be greater than zero');
+  const bindAddr = parseListenAddr(rawConfig.LISTEN_ADDR);
   let baseURL = rawConfig.UPSTREAM_BASE_URL.trim().replace(/\/+$/, '');
   try { const parsed = new URL(baseURL); if (parsed.host.toLowerCase() === 'codebuff.com') { parsed.host = 'www.codebuff.com'; baseURL = parsed.toString().replace(/\/+$/, ''); } } catch (e) {}
   return {
     listenAddr: rawConfig.LISTEN_ADDR,
+    bindHost: bindAddr.host,
+    bindPort: bindAddr.port,
     upstreamBaseURL: baseURL,
     authTokens: [...new Set(rawConfig.AUTH_TOKENS || [])],
     requestTimeout,
     apiKeys: [...new Set(rawConfig.API_KEYS || [])],
+    disableAuth: rawConfig.DISABLE_AUTH === true,
     mockCountry: rawConfig.MOCK_COUNTRY || null,
     enabledModels: Array.isArray(rawConfig.ENABLED_MODELS) ? rawConfig.ENABLED_MODELS : null,
     legacyDisabledModels: Array.isArray(rawConfig.DISABLED_MODELS) ? rawConfig.DISABLED_MODELS : null
   };
+}
+
+function parseListenAddr(addr) {
+  addr = addr || '127.0.0.1:8080';
+  const lastColon = addr.lastIndexOf(':');
+  if (lastColon < 0) return { host: '127.0.0.1', port: parseInt(addr) || 8080 };
+  const hostPart = addr.substring(0, lastColon);
+  const portPart = addr.substring(lastColon + 1);
+  const host = hostPart || '127.0.0.1';
+  const port = parseInt(portPart) || 8080;
+  return { host, port };
 }
 
 function loadFreebuffCLITokens() {
@@ -1517,7 +1533,10 @@ function isRunInvalid(statusCode, body) {
 
 // --- HTTP Handlers ---
 function authorized(req) {
-  if (!config.apiKeys || config.apiKeys.length === 0) return true;
+  if (!config.apiKeys || config.apiKeys.length === 0) {
+    if (config.disableAuth) return true;
+    return false;
+  }
   const xApiKey = (req.headers['x-api-key'] || '').trim();
   if (xApiKey && config.apiKeys.includes(xApiKey)) return true;
   const authorization = (req.headers['authorization'] || '').trim();
@@ -2065,7 +2084,7 @@ async function handleRequest(req, res) {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
 
-  if (config.apiKeys && config.apiKeys.length > 0 && !authorized(req)) {
+  if (!authorized(req)) {
     if (isClaudeRequestPath(pathname)) writeClaudeError(res, 401, 'invalid proxy api key', 'authentication_error');
     else writeOpenAIError(res, 401, 'invalid proxy api key', 'authentication_error', '');
     return;
@@ -2247,7 +2266,8 @@ async function startServer() {
 
   const allTokenResults = await validateAllTokens();
   const validTokens = allTokenResults.filter(r => r.valid);
-  const port = parseInt(config.listenAddr.replace(':', '')) || 8080;
+  const bindHost = config.bindHost || '127.0.0.1';
+  const bindPort = config.bindPort || 8080;
 
   const client = new UpstreamClient(config);
 
@@ -2264,15 +2284,21 @@ async function startServer() {
   }
 
   const server = http.createServer(handleRequest);
-  server.listen(port, '0.0.0.0', () => {
-    console.log(`\nFreebuff2Opencode Proxy on http://127.0.0.1:${port}`);
+  server.listen(bindPort, bindHost, () => {
+    console.log(`\nFreebuff2Opencode Proxy on http://${bindHost}:${bindPort}`);
     console.log(`  Upstream: ${config.upstreamBaseURL}`);
     console.log(`  Models: ${modelRegistry.getModels().length}`);
-    console.log(`  API keys: ${config.apiKeys.length > 0 ? config.apiKeys.length + ' (auth enabled)' : 'none (open access)'}`);
+    if (config.apiKeys.length > 0) {
+      console.log(`  API keys: ${config.apiKeys.length} (auth enabled)`);
+    } else if (config.disableAuth) {
+      console.log(`  API keys: none (auth DISABLED via config — open access)`);
+    } else {
+      console.log(`  API keys: none (set API_KEYS or DISABLE_AUTH=true in config)`);
+    }
     console.log(`  Valid tokens: ${validTokens.length}`);
     console.log('');
     if (firstRun) {
-      const dashboardUrl = `http://localhost:${port}`;
+      const dashboardUrl = `http://localhost:${bindPort}`;
       if (process.platform === 'win32') {
         require('child_process').exec(`start "" "${dashboardUrl}"`);
       } else if (process.platform === 'darwin') {
