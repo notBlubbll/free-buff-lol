@@ -28,6 +28,19 @@ let FREEBUFF_CLI_VERSION = '0.0.96';
 let AI_SDK_COMPAT_VERSION = FREEBUFF_CLI_VERSION;
 let DETECTED_COUNTRY = null;
 
+// --- Logging ---
+const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
+const LOG_LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
+function logAt(level, ...args) {
+  if ((LOG_LEVELS[level] || 0) <= (LOG_LEVELS[LOG_LEVEL] || 2)) {
+    console.log(`[${level.toUpperCase()}]`, ...args);
+  }
+}
+function logDebug(...args) { logAt('debug', ...args); }
+function logInfo(...args) { logAt('info', ...args); }
+function logWarn(...args) { logAt('warn', ...args); }
+function logError(...args) { logAt('error', ...args); }
+
 let LAST_REQUEST = 0;
 async function debounceRequest() {
   const now = Date.now();
@@ -45,6 +58,7 @@ const CANONICAL_MODEL_ALIASES = {
   'mimo-v2.5-pro': 'mimo/mimo-v2.5-pro',
   'mimo-v2.5': 'mimo/mimo-v2.5',
   'kimi-k2.6': 'moonshotai/kimi-k2.6',
+  'kimi-k2.7-code': 'moonshotai/kimi-k2.7-code',
   'minimax-m2.7': 'minimax/minimax-m2.7',
   'minimax-m3': 'minimax/minimax-m3',
   'gemini-3.1-flash-lite': 'google/gemini-3.1-flash-lite-preview',
@@ -56,6 +70,7 @@ const FALLBACK_AGENT_IDS = {
   'minimax/minimax-m2.7': 'base2-free',
   'minimax/minimax-m3': 'base2-free-minimax-m3',
   'moonshotai/kimi-k2.6': 'base2-free-kimi',
+  'moonshotai/kimi-k2.7-code': 'base2-free-kimi',
   'deepseek/deepseek-v4-pro': 'base2-free-deepseek',
   'deepseek/deepseek-v4-flash': 'base2-free-deepseek-flash',
   'mimo/mimo-v2.5-pro': 'base2-free-mimo-pro',
@@ -188,6 +203,22 @@ let modelRegistry = null;
 let tokenPool = null;
 let startTime = new Date();
 
+const MODEL_MISMATCH_LOG = [];
+const MODEL_MISMATCH_MAX = 50;
+
+function logModelMismatch(requestedModel, actualModel, reason, tokenIdx) {
+  const entry = {
+    requested: requestedModel,
+    actual: actualModel,
+    reason: reason || 'unknown',
+    token: tokenIdx != null ? `token-${tokenIdx + 1}` : null,
+    at: new Date().toISOString()
+  };
+  MODEL_MISMATCH_LOG.unshift(entry);
+  if (MODEL_MISMATCH_LOG.length > MODEL_MISMATCH_MAX) MODEL_MISMATCH_LOG.length = MODEL_MISMATCH_MAX;
+  logWarn(`[Model Mismatch] requested=${requestedModel}, actual=${actualModel}, reason=${reason}`);
+}
+
 function parseDuration(str) {
   if (!str) return 0;
   const match = str.match(/^(\d+)(h|m|s)$/);
@@ -205,7 +236,9 @@ function loadConfig() {
   let rawConfig = {
     LISTEN_ADDR: ':8080',
     UPSTREAM_BASE_URL: 'https://www.codebuff.com',
-    REQUEST_TIMEOUT: '15m'
+    REQUEST_TIMEOUT: '15m',
+    LOG_LEVEL: 'info',
+    TOKEN_REVALIDATE_INTERVAL: '5m'
   };
   if (fs.existsSync(configPath)) {
     try { rawConfig = { ...rawConfig, ...JSON.parse(fs.readFileSync(configPath, 'utf8')) }; } catch (e) { console.error('Failed to parse config.json:', e.message); }
@@ -217,14 +250,18 @@ function loadConfig() {
   if (process.env.API_KEYS) rawConfig.API_KEYS = process.env.API_KEYS.split(',').map(t => t.trim()).filter(Boolean);
   if (process.env.ENABLED_MODELS) rawConfig.ENABLED_MODELS = process.env.ENABLED_MODELS.split(',').map(t => t.trim()).filter(Boolean);
   if (process.env.MOCK_COUNTRY) rawConfig.MOCK_COUNTRY = process.env.MOCK_COUNTRY.trim().toUpperCase();
+  if (process.env.LOG_LEVEL) rawConfig.LOG_LEVEL = process.env.LOG_LEVEL;
+  if (process.env.TOKEN_REVALIDATE_INTERVAL) rawConfig.TOKEN_REVALIDATE_INTERVAL = process.env.TOKEN_REVALIDATE_INTERVAL;
   if (!rawConfig.AUTH_TOKENS || rawConfig.AUTH_TOKENS.length === 0) {
     const cliTokens = loadFreebuffCLITokens();
-    if (cliTokens.length > 0) { rawConfig.AUTH_TOKENS = cliTokens; console.log(`Loaded ${cliTokens.length} token(s) from Freebuff CLI`); }
+    if (cliTokens.length > 0) { rawConfig.AUTH_TOKENS = cliTokens; logInfo(`Loaded ${cliTokens.length} token(s) from Freebuff CLI`); }
   }
   const requestTimeout = parseDuration(rawConfig.REQUEST_TIMEOUT);
   if (!rawConfig.LISTEN_ADDR) throw new Error('LISTEN_ADDR cannot be empty');
   if (!rawConfig.UPSTREAM_BASE_URL) throw new Error('UPSTREAM_BASE_URL cannot be empty');
   if (requestTimeout <= 0) throw new Error('REQUEST_TIMEOUT must be greater than zero');
+  const tokenRevalidateInterval = parseDuration(rawConfig.TOKEN_REVALIDATE_INTERVAL);
+  if (tokenRevalidateInterval <= 0) throw new Error('TOKEN_REVALIDATE_INTERVAL must be greater than zero');
   let baseURL = rawConfig.UPSTREAM_BASE_URL.trim().replace(/\/+$/, '');
   try { const parsed = new URL(baseURL); if (parsed.host.toLowerCase() === 'codebuff.com') { parsed.host = 'www.codebuff.com'; baseURL = parsed.toString().replace(/\/+$/, ''); } } catch (e) {}
   return {
@@ -235,12 +272,15 @@ function loadConfig() {
     apiKeys: [...new Set(rawConfig.API_KEYS || [])],
     mockCountry: rawConfig.MOCK_COUNTRY || null,
     enabledModels: Array.isArray(rawConfig.ENABLED_MODELS) ? rawConfig.ENABLED_MODELS : null,
-    legacyDisabledModels: Array.isArray(rawConfig.DISABLED_MODELS) ? rawConfig.DISABLED_MODELS : null
+    legacyDisabledModels: Array.isArray(rawConfig.DISABLED_MODELS) ? rawConfig.DISABLED_MODELS : null,
+    logLevel: rawConfig.LOG_LEVEL,
+    tokenRevalidateInterval
   };
 }
 
 function loadFreebuffCLITokens() {
   const tokens = [];
+  const watchedPaths = [];
   const credFile = 'credentials.json';
   const subPath = path.join('.config', 'manicode', credFile);
 
@@ -302,6 +342,7 @@ function loadFreebuffCLITokens() {
 
   for (const credPath of searchPaths) {
     if (fs.existsSync(credPath)) {
+      watchedPaths.push(credPath);
       try {
         const data = JSON.parse(fs.readFileSync(credPath, 'utf8'));
         if (data.default && data.default.authToken) tokens.push(data.default.authToken);
@@ -312,7 +353,7 @@ function loadFreebuffCLITokens() {
       } catch (e) { console.error('Failed to parse Freebuff CLI credentials:', e.message); }
     }
   }
-  return tokens;
+  return { tokens, watchedPaths };
 }
 
 function saveConfig(cfg) {
@@ -329,8 +370,40 @@ function saveConfig(cfg) {
     AUTH_TOKENS: cfg.authTokens,
     REQUEST_TIMEOUT: `${cfg.requestTimeout / (60 * 1000)}m`,
     API_KEYS: cfg.apiKeys,
-    ENABLED_MODELS: cfg.enabledModels || []
+    ENABLED_MODELS: cfg.enabledModels || [],
+    LOG_LEVEL: cfg.logLevel || 'info',
+    TOKEN_REVALIDATE_INTERVAL: `${(cfg.tokenRevalidateInterval || 300000) / (60 * 1000)}m`
   }, null, 2));
+}
+
+// --- State Persistence (sessions, health, locks) ---
+const STATE_PATH = path.join(__dirname, '.config', 'state.json');
+
+function loadState() {
+  try {
+    if (fs.existsSync(STATE_PATH)) {
+      const raw = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+      // Filter out expired sessions
+      const now = Date.now();
+      if (raw.sessions) {
+        for (const [key, session] of Object.entries(raw.sessions)) {
+          if (session.expiresAt && new Date(session.expiresAt).getTime() < now) {
+            delete raw.sessions[key];
+          }
+        }
+      }
+      return raw;
+    }
+  } catch (e) { logWarn(`[State] Failed to load state: ${e.message}`); }
+  return { sessions: {}, lockedModels: {}, tokenHealth: {} };
+}
+
+function saveState(state) {
+  try {
+    const configDir = path.join(__dirname, '.config');
+    if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+  } catch (e) { logWarn(`[State] Failed to save state: ${e.message}`); }
 }
 
 let cachedOpencodeConfigPaths = null;
@@ -390,19 +463,19 @@ function discoverOpencodeConfigsAsync() {
         (err, stdout, stderr) => {
           const found = (stdout || '').trim().split('\n').filter(Boolean).map(s => s.trim()).filter(s => s.toLowerCase().endsWith('opencode.json'));
           if (found.length > 0) {
-            console.log(`[Opencode] Discovered ${found.length} config(s): ${found.join(', ')}`);
+            logInfo(`[Opencode] Discovered ${found.length} config(s): ${found.join(', ')}`);
             cachedOpencodeConfigPaths = [...new Set([...existingFallbacks, ...found])].filter(p => fs.existsSync(path.dirname(p)));
             resolve([...cachedOpencodeConfigPaths]);
             return;
           }
-          console.log(`[Opencode] Discovery returned no results, using fallback paths (${existingFallbacks.length})`);
+          logInfo(`[Opencode] Discovery returned no results, using fallback paths (${existingFallbacks.length})`);
           cachedOpencodeConfigPaths = [...existingFallbacks];
           resolve([...cachedOpencodeConfigPaths]);
         }
       );
       if (child && child.unref) child.unref();
     } catch (e) {
-      console.log(`[Opencode] Discovery failed (${e.message}), using fallback paths (${existingFallbacks.length})`);
+      logInfo(`[Opencode] Discovery failed (${e.message}), using fallback paths (${existingFallbacks.length})`);
       cachedOpencodeConfigPaths = [...existingFallbacks];
       resolve([...cachedOpencodeConfigPaths]);
     }
@@ -419,6 +492,26 @@ async function setupOpencodeConfig(skipRemovalSync) {
   const configPaths = await discoverOpencodeConfigsAsync();
   let firstRun = false;
 
+  // Pre-compute registry-derived state once so warnings are not repeated per config file.
+  const allRegistryModels = modelRegistry.getModels();
+  const registryCanonicalSet = new Set(allRegistryModels.map(canonicalModelName));
+  if (!Array.isArray(config.enabledModels)) {
+    if (Array.isArray(config.legacyDisabledModels)) {
+      const disabledSet = new Set(config.legacyDisabledModels);
+      config.enabledModels = allRegistryModels.filter(m => !disabledSet.has(m));
+      logInfo(`[Opencode] Migrated DISABLED_MODELS -> ENABLED_MODELS (${config.enabledModels.length}/${allRegistryModels.length} models)`);
+    } else {
+      config.enabledModels = [...allRegistryModels];
+      logInfo(`[Opencode] Initialized ENABLED_MODELS with all ${allRegistryModels.length} models`);
+    }
+    delete config.legacyDisabledModels;
+    saveConfig(config);
+  }
+  const unmatchedEnabled = (config.enabledModels || []).filter(m => !registryCanonicalSet.has(canonicalModelName(m)));
+  if (unmatchedEnabled.length > 0) {
+    logWarn(`[Opencode] Warning: enabled models not found in registry: ${unmatchedEnabled.join(', ')}`);
+  }
+
   for (const configFile of configPaths) {
     try {
       const dir = path.dirname(configFile);
@@ -429,30 +522,14 @@ async function setupOpencodeConfig(skipRemovalSync) {
         existing = JSON.parse(fs.readFileSync(configFile, 'utf8'));
         if (!fs.existsSync(backupFile)) {
           fs.copyFileSync(configFile, backupFile);
-          console.log(`[Opencode] Backup created: ${backupFile}`);
+          logInfo(`[Opencode] Backup created: ${backupFile}`);
           firstRun = true;
-        } else {
-          console.log(`[Opencode] Backup already exists: ${backupFile}`);
         }
       } else {
-        console.log(`[Opencode] No existing config found, will create: ${configFile}`);
+        logInfo(`[Opencode] No existing config found, will create: ${configFile}`);
         firstRun = true;
       }
       if (!existing.provider || typeof existing.provider !== 'object') existing.provider = {};
-      const allRegistryModels = modelRegistry.getModels();
-
-      if (!Array.isArray(config.enabledModels)) {
-        if (Array.isArray(config.legacyDisabledModels)) {
-          const disabledSet = new Set(config.legacyDisabledModels);
-          config.enabledModels = allRegistryModels.filter(m => !disabledSet.has(m));
-          console.log(`[Opencode] Migrated DISABLED_MODELS -> ENABLED_MODELS (${config.enabledModels.length}/${allRegistryModels.length} models)`);
-        } else {
-          config.enabledModels = [...allRegistryModels];
-          console.log(`[Opencode] Initialized ENABLED_MODELS with all ${allRegistryModels.length} models`);
-        }
-        delete config.legacyDisabledModels;
-        saveConfig(config);
-      }
 
       const existingModels = existing.provider['freebuff'] && existing.provider['freebuff'].models && Object.keys(existing.provider['freebuff'].models).length > 0
         ? Object.keys(existing.provider['freebuff'].models).map(canonicalModelName)
@@ -465,30 +542,36 @@ async function setupOpencodeConfig(skipRemovalSync) {
         if (removedFromProvider.length > 0) {
           config.enabledModels = config.enabledModels.filter(m => !removedFromProvider.includes(canonicalModelName(m)));
           saveConfig(config);
-          for (const rm of removedFromProvider) console.log(`[Opencode] Detected manual removal of ${rm}, removed from ENABLED_MODELS`);
+          for (const rm of removedFromProvider) logInfo(`[Opencode] Detected manual removal of ${rm}, removed from ENABLED_MODELS`);
         }
       }
       let enabledSet = new Set((config.enabledModels || []).map(canonicalModelName));
-      const unmatchedEnabled = (config.enabledModels || []).filter(m => !allRegistryModels.map(canonicalModelName).includes(canonicalModelName(m)));
-      if (unmatchedEnabled.length > 0) {
-        console.log(`[Opencode] Warning: enabled models not found in registry: ${unmatchedEnabled.join(', ')}`);
-      }
       let models = {};
       for (const m of allRegistryModels) {
-        if (!enabledSet.has(canonicalModelName(m))) { console.log(`[Opencode] Skipping non-enabled model: ${m}`); continue; }
+        if (!enabledSet.has(canonicalModelName(m))) { logDebug(`[Opencode] Skipping non-enabled model: ${m}`); continue; }
         const meta = modelRegistry.getModelMetadata(m);
         const name = meta && meta.premium ? `[LIM] ${modelRegistry.getDisplayName(m)}` : modelRegistry.getDisplayName(m);
-        models[m] = { name, multimodal: meta ? meta.multimodal : undefined, free: meta ? meta.free : undefined };
+        const entry = { name };
+        if (meta) {
+          if (meta.modalities) entry.modalities = meta.modalities;
+          if (meta.limit) entry.limit = meta.limit;
+        }
+        models[m] = entry;
       }
       if (Object.keys(models).length === 0 && allRegistryModels.length > 0) {
-        console.log(`[Opencode] Warning: no enabled models matched registry; falling back to all ${allRegistryModels.length} registry models`);
+        logWarn(`[Opencode] Warning: no enabled models matched registry; falling back to all ${allRegistryModels.length} registry models`);
         for (const m of allRegistryModels) {
           const meta = modelRegistry.getModelMetadata(m);
           const name = meta && meta.premium ? `[LIM] ${modelRegistry.getDisplayName(m)}` : modelRegistry.getDisplayName(m);
-          models[m] = { name };
+          const entry = { name };
+          if (meta) {
+            if (meta.modalities) entry.modalities = meta.modalities;
+            if (meta.limit) entry.limit = meta.limit;
+          }
+          models[m] = entry;
         }
       }
-      console.log(`[Opencode] enabledModels=[${(config.enabledModels || []).join(', ')}] registry=${allRegistryModels.length} models, writing ${Object.keys(models).length} models to provider`);
+      logInfo(`[Opencode] Writing ${Object.keys(models).length}/${allRegistryModels.length} models to ${configFile}`);
       existing.provider['freebuff'] = {
         npm: '@ai-sdk/openai-compatible',
         name: 'Freebuff Proxy',
@@ -496,9 +579,9 @@ async function setupOpencodeConfig(skipRemovalSync) {
         models
       };
       fs.writeFileSync(configFile, JSON.stringify(existing, null, 2));
-      console.log(`[Opencode] Config updated: ${configFile}`);
+      logInfo(`[Opencode] Config updated: ${configFile}`);
     } catch (e) {
-      console.error(`[Opencode] Failed to update ${configFile}: ${e.message}`);
+      logError(`[Opencode] Failed to update ${configFile}: ${e.message}`);
     }
   }
   return firstRun;
@@ -529,15 +612,15 @@ class ModelRegistry {
 
   async refresh() {
     const HARDCODED_MODELS = [
-      { model: 'deepseek/deepseek-v4-pro', agent: 'base2-free-deepseek', displayName: 'DeepSeek V4 Pro', premium: true, multimodal: false },
-      { model: 'mimo/mimo-v2.5-pro', agent: 'base2-free-mimo-pro', displayName: 'MiMo 2.5 Pro', premium: true, multimodal: true },
-      { model: 'moonshotai/kimi-k2.6', agent: 'base2-free-kimi', displayName: 'Kimi K2.6', premium: true, multimodal: true },
-      { model: 'minimax/minimax-m3', agent: 'base2-free-minimax-m3', displayName: 'MiniMax M3', premium: false, multimodal: true, free: true },
-      { model: 'deepseek/deepseek-v4-flash', agent: 'base2-free-deepseek-flash', displayName: 'DeepSeek V4 Flash', premium: false, multimodal: false, free: true },
-      { model: 'mimo/mimo-v2.5', agent: 'base2-free-mimo', displayName: 'MiMo 2.5', premium: false, multimodal: true, free: true },
-      { model: 'minimax/minimax-m2.7', agent: 'base2-free', displayName: 'MiniMax M2.7', premium: false, multimodal: false, free: true },
-      { model: 'google/gemini-3.1-flash-lite-preview', agent: 'basher', displayName: 'Gemini 3.1 Flash Lite', premium: false, multimodal: false, free: true },
-      { model: 'google/gemini-3.1-pro-preview', agent: 'thinker-with-files-gemini', displayName: 'Gemini 3.1 Pro', premium: true, multimodal: false, free: true },
+      { model: 'deepseek/deepseek-v4-pro', agent: 'base2-free-deepseek', displayName: 'DeepSeek V4 Pro', premium: true, modalities: { input: ['text', 'image'], output: ['text'] }, limit: { context: 128000, output: 32000 } },
+      { model: 'mimo/mimo-v2.5-pro', agent: 'base2-free-mimo-pro', displayName: 'MiMo 2.5 Pro', premium: true, modalities: { input: ['text', 'image'], output: ['text'] }, limit: { context: 512000, output: 32000 } },
+      { model: 'moonshotai/kimi-k2.6', agent: 'base2-free-kimi', displayName: 'Kimi K2.6', premium: true, modalities: { input: ['text', 'image'], output: ['text'] }, limit: { context: 256000, output: 32000 } },
+      { model: 'minimax/minimax-m3', agent: 'base2-free-minimax-m3', displayName: 'MiniMax M3', premium: false, modalities: { input: ['text', 'image', 'video'], output: ['text'] }, limit: { context: 512000, output: 32000 } },
+      { model: 'deepseek/deepseek-v4-flash', agent: 'base2-free-deepseek-flash', displayName: 'DeepSeek V4 Flash', premium: false, modalities: { input: ['text'], output: ['text'] }, limit: { context: 128000, output: 32000 } },
+      { model: 'mimo/mimo-v2.5', agent: 'base2-free-mimo', displayName: 'MiMo 2.5', premium: false, modalities: { input: ['text', 'image'], output: ['text'] }, limit: { context: 512000, output: 32000 } },
+      { model: 'minimax/minimax-m2.7', agent: 'base2-free', displayName: 'MiniMax M2.7', premium: false, modalities: { input: ['text'], output: ['text'] }, limit: { context: 128000, output: 32000 } },
+      { model: 'google/gemini-3.1-flash-lite-preview', agent: 'basher', displayName: 'Gemini 3.1 Flash Lite', premium: false, modalities: { input: ['text', 'image'], output: ['text'] }, limit: { context: 256000, output: 32000 } },
+      { model: 'google/gemini-3.1-pro-preview', agent: 'thinker-with-files-gemini', displayName: 'Gemini 3.1 Pro', premium: true, modalities: { input: ['text', 'image'], output: ['text'] }, limit: { context: 256000, output: 32000 } },
     ];
 
     let loaded = false;
@@ -578,13 +661,13 @@ class ModelRegistry {
         const agentModels = new Map();
 
         for (const [model, agent] of rootAgentMapping) {
-          if (isBlacklistedModel(model)) { console.log(`Model registry: blacklisted model excluded: ${model}`); continue; }
+          if (isBlacklistedModel(model)) { logInfo(`Model registry: blacklisted model excluded: ${model}`); continue; }
           modelToAgent.set(model, agent);
           allModels.push(model);
           const meta = parsedMetadata.get(model);
           const displayName = meta ? meta.displayName : model.split('/').pop();
           modelDisplayNames.set(model, displayName);
-          modelMetadata.set(model, meta || { displayName, premium: false, multimodal: false, free: false });
+          modelMetadata.set(model, meta || { displayName, premium: false, modalities: null, limit: null });
           if (!agentModels.has(agent)) agentModels.set(agent, []);
           agentModels.get(agent).push(model);
         }
@@ -597,10 +680,10 @@ class ModelRegistry {
         this.modelMetadata = modelMetadata;
         this.lastOK = new Date();
         loaded = true;
-        console.log(`Model registry: fetched ${allModels.length} models from GitHub: ${allModels.join(', ')}`);
+        logInfo(`Model registry: fetched ${allModels.length} models from GitHub: ${allModels.join(', ')}`);
       }
     } catch (e) {
-      console.error('Model registry: GitHub fetch failed:', e.message);
+      logError('Model registry: GitHub fetch failed:', e.message);
     }
 
     if (!loaded) {
@@ -611,11 +694,11 @@ class ModelRegistry {
       const agentModels = new Map();
 
       for (const entry of HARDCODED_MODELS) {
-        if (isBlacklistedModel(entry.model)) { console.log(`Model registry: blacklisted hardcoded model excluded: ${entry.model}`); continue; }
+        if (isBlacklistedModel(entry.model)) { logInfo(`Model registry: blacklisted hardcoded model excluded: ${entry.model}`); continue; }
         modelToAgent.set(entry.model, entry.agent);
         allModels.push(entry.model);
         modelDisplayNames.set(entry.model, entry.displayName);
-        modelMetadata.set(entry.model, { displayName: entry.displayName, premium: entry.premium, multimodal: entry.multimodal, free: entry.free || false });
+        modelMetadata.set(entry.model, { displayName: entry.displayName, premium: entry.premium, modalities: entry.modalities || null, limit: entry.limit || null });
         if (!agentModels.has(entry.agent)) agentModels.set(entry.agent, []);
         agentModels.get(entry.agent).push(entry.model);
       }
@@ -627,7 +710,7 @@ class ModelRegistry {
       this.modelDisplayNames = modelDisplayNames;
       this.modelMetadata = modelMetadata;
       this.lastOK = new Date();
-      console.log(`Model registry: hardcoded fallback ${allModels.length} models: ${allModels.join(', ')}`);
+      logInfo(`Model registry: hardcoded fallback ${allModels.length} models: ${allModels.join(', ')}`);
     }
   }
 
@@ -754,8 +837,10 @@ class ModelRegistry {
       const blockMatch = lines[i].match(/^const\s+(\w+)\s*=\s*\{$/);
       if (!blockMatch) continue;
       const varName = blockMatch[1];
-      let id = null, displayName = null, premium = false, multimodal = false, free = false;
-      for (let j = i + 1; j < Math.min(i + 20, lines.length); j++) {
+      let id = null, displayName = null, premium = false;
+      let contextWindow = null, maxOutput = null;
+      const inputModalities = [], outputModalities = [];
+      for (let j = i + 1; j < Math.min(i + 30, lines.length); j++) {
         const line = lines[j];
         if (line.trim().startsWith('}')) break;
         const idMatch = line.match(/id:\s*(\w+|'[^']*')/);
@@ -767,12 +852,22 @@ class ModelRegistry {
         if (dnMatch) displayName = dnMatch[1];
         const premMatch = line.match(/premium:\s*(true|false)/);
         if (premMatch) premium = premMatch[1] === 'true';
-        const mmMatch = line.match(/multimodal:\s*(true|false)/);
-        if (mmMatch) multimodal = mmMatch[1] === 'true';
-        const freeMatch = line.match(/free:\s*(true|false)/);
-        if (freeMatch) free = freeMatch[1] === 'true';
+        const ctxMatch = line.match(/contextWindow:\s*(\d+)/);
+        if (ctxMatch) contextWindow = parseInt(ctxMatch[1]);
+        const maxOutMatch = line.match(/maxOutput:\s*(\d+)/);
+        if (maxOutMatch) maxOutput = parseInt(maxOutMatch[1]);
+        const inModMatch = line.match(/input:\s*\[([^\]]*)\]/);
+        if (inModMatch) inModMatch[1].split(',').forEach(s => { const t = s.trim().replace(/['"]/g, ''); if (t) inputModalities.push(t); });
+        const outModMatch = line.match(/output:\s*\[([^\]]*)\]/);
+        if (outModMatch) outModMatch[1].split(',').forEach(s => { const t = s.trim().replace(/['"]/g, ''); if (t) outputModalities.push(t); });
       }
-      if (id && displayName) result.set(id, { displayName, premium, multimodal, free });
+      if (id && displayName) {
+        const modalities = inputModalities.length > 0 || outputModalities.length > 0
+          ? { input: inputModalities.length > 0 ? inputModalities : ['text'], output: outputModalities.length > 0 ? outputModalities : ['text'] }
+          : null;
+        const limit = contextWindow || maxOutput ? { context: contextWindow || null, output: maxOutput || null } : null;
+        result.set(id, { displayName, premium, modalities, limit });
+      }
     }
     return result;
   }
@@ -909,7 +1004,7 @@ class UpstreamClient {
       'Content-Type': 'application/json',
       ...extraHeaders
     });
-    console.log(`[API] ${method} ${pth}`);
+    logDebug(`[API] ${method} ${pth}`);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout);
     try {
@@ -994,7 +1089,7 @@ class UpstreamClient {
     if (method === 'POST') headers['Content-Type'] = 'application/json';
     const body = method === 'POST' ? (countryCode ? JSON.stringify({ countryCode }) : '{}') : null;
     const requestURL = this.baseURL + '/api/v1/freebuff/session';
-    console.log(`[DEBUG] Session ${method} sending to ${requestURL}`);
+    logDebug(`Session ${method} sending to ${requestURL}`);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout);
     try {
@@ -1002,7 +1097,7 @@ class UpstreamClient {
       const resp = await fetch(requestURL, fetchOpts);
       clearTimeout(timer);
       const data = await resp.text();
-      console.log(`[DEBUG] Session ${method} response (${resp.status}): ${data.substring(0, 300)}`);
+      logDebug(`Session ${method} response (${resp.status}): ${data.substring(0, 300)}`);
       if (resp.status === 404) return { status: 'disabled' };
       if (resp.status < 200 || resp.status >= 300) {
         if (resp.status === 426 || data.includes('freebuff_update_required')) throw new Error('freebuff_update_required');
@@ -1017,9 +1112,9 @@ class UpstreamClient {
     const agentDefs = buildAgentValidationPayload();
     const resp = await this.doJSON(authToken, '/api/agents/validate', agentDefs, 'POST', { 'User-Agent': CODEBUFF_JSON_USER_AGENT });
     if (resp.status >= 200 && resp.status < 300) {
-      console.log('[Agents] Validation completed');
+      logInfo('[Agents] Validation completed');
     } else {
-      console.log(`[Agents] Validation failed (${resp.status}), continuing with server configs`);
+      logWarn(`[Agents] Validation failed (${resp.status}), continuing with server configs`);
     }
   }
 
@@ -1057,9 +1152,9 @@ class UpstreamClient {
       });
       clearTimeout(timer);
       const data = await resp.text();
-      if (resp.status >= 400) console.log(`[Ads] Zeroclick impression failed: ${resp.status}`);
+      if (resp.status >= 400) logWarn(`[Ads] Zeroclick impression failed: ${resp.status}`);
       return { status: resp.status, body: data };
-    } catch (e) { clearTimeout(timer); console.error(`[Ads] Zeroclick error: ${e.message}`); }
+    } catch (e) { clearTimeout(timer); logError(`[Ads] Zeroclick error: ${e.message}`); }
   }
 
   async reportCodebuffImpression(authToken, impUrl) {
@@ -1078,6 +1173,62 @@ class TokenPool {
     this.sessions = new Map();
     this.lockedModels = new Map();
     this.mutex = Promise.resolve();
+    this.tokenHealth = new Map();
+
+    // Load persisted state
+    const state = loadState();
+    if (state.lockedModels) {
+      for (const [token, model] of Object.entries(state.lockedModels)) {
+        if (tokens.includes(token)) this.lockedModels.set(token, model);
+      }
+    }
+    if (state.tokenHealth) {
+      for (const [token, health] of Object.entries(state.tokenHealth)) {
+        if (tokens.includes(token)) this.tokenHealth.set(token, health);
+      }
+    }
+    if (state.sessions) {
+      for (const [key, session] of Object.entries(state.sessions)) {
+        const token = key.split(':')[0];
+        if (tokens.includes(token)) {
+          session.expiresAt = session.expiresAt ? new Date(session.expiresAt) : null;
+          this.sessions.set(key, session);
+        }
+      }
+    }
+
+    for (const token of tokens) {
+      if (!this.tokenHealth.has(token)) {
+        this.tokenHealth.set(token, { status: 'unknown', error: null, checkedAt: null });
+      }
+    }
+
+    const restoredSessions = this.sessions.size;
+    const restoredLocks = this.lockedModels.size;
+    const restoredHealth = [...this.tokenHealth.values()].filter(h => h.status !== 'unknown').length;
+    if (restoredSessions || restoredLocks || restoredHealth) {
+      logInfo(`[State] Restored: ${restoredSessions} session(s), ${restoredLocks} lock(s), ${restoredHealth} health record(s)`);
+    }
+
+    // Periodic state save
+    this._stateSaveTimer = setInterval(() => this.persistState(), 30_000);
+  }
+
+  persistState() {
+    const state = { sessions: {}, lockedModels: {}, tokenHealth: {} };
+    for (const [key, session] of this.sessions.entries()) {
+      state.sessions[key] = {
+        ...session,
+        expiresAt: session.expiresAt ? session.expiresAt.toISOString() : null
+      };
+    }
+    for (const [token, model] of this.lockedModels.entries()) {
+      state.lockedModels[token] = model;
+    }
+    for (const [token, health] of this.tokenHealth.entries()) {
+      state.tokenHealth[token] = health;
+    }
+    saveState(state);
   }
 
   async withLock(fn) {
@@ -1091,9 +1242,21 @@ class TokenPool {
 
   getToken() {
     if (this.tokens.length === 0) return null;
-    const token = this.tokens[this.currentIndex % this.tokens.length];
-    this.currentIndex++;
-    return token;
+    const scored = this.tokens.map(token => {
+      const health = this.tokenHealth.get(token) || { status: 'unknown' };
+      if (health.status === 'banned' || health.status === 'unauthorized') return null;
+      let remaining = 6;
+      for (const [key, session] of this.sessions.entries()) {
+        if (key.startsWith(token + ':') && session.rateLimit) {
+          remaining = session.rateLimit.limit - session.rateLimit.recentCount;
+          break;
+        }
+      }
+      return { token, remaining };
+    }).filter(Boolean).sort((a, b) => b.remaining - a.remaining || 0);
+    if (scored.length === 0) return null;
+    this.currentIndex = (this.currentIndex + 1) % this.tokens.length;
+    return scored[0].token;
   }
 
   sessionKey(token, model) { return `${token}:${model}`; }
@@ -1106,17 +1269,29 @@ class TokenPool {
     const accessTier = state.accessTier || null;
     const countryBlockReason = state.countryBlockReason || null;
     const model = state.model || null;
-    return { status: 'active', instanceID, expiresAt, countryCode, remainingMs, accessTier, countryBlockReason, model };
+    const rl = state.rateLimit;
+    const rateLimit = rl ? {
+      model: rl.model || null,
+      entitlement: rl.entitlement || null,
+      limit: rl.limit || 0,
+      period: rl.period || null,
+      resetAt: rl.resetAt || null,
+      windowHours: rl.windowHours || 0,
+      recentCount: rl.recentCount || 0,
+      rateLimitsByModel: rl.rateLimitsByModel || null
+    } : null;
+    return { status: 'active', instanceID, expiresAt, countryCode, remainingMs, accessTier, countryBlockReason, model, rateLimit };
   }
 
   async ensureSession(token, model) {
     const requestedModel = model;
     const locked = await this.withLock(async () => this.lockedModels.get(token));
     if (locked && locked !== requestedModel) {
-      console.log(`${token.substring(0, 8)}...: request for ${requestedModel} differs from cached lock ${locked}, ending session to unlock`);
+      logInfo(`${token.substring(0, 8)}...: request for ${requestedModel} differs from cached lock ${locked}, ending session to unlock`);
       await this.endAllSessionsForToken(token);
-      try { await this.client.endSession(token); } catch (e2) { console.error(`endSession(no-id) failed: ${e2.message}`); }
+      try { await this.client.endSession(token); } catch (e2) { logError(`endSession(no-id) failed: ${e2.message}`); }
       await this.withLock(async () => { this.lockedModels.delete(token); });
+      this.persistState();
       await new Promise(r => setTimeout(r, 500));
     }
     let key = this.sessionKey(token, model);
@@ -1145,23 +1320,46 @@ class TokenPool {
           state = await this.client.createSession(token, model);
         }
         state = await this.pollUntilReady(token, model, state);
-        console.log(`[DEBUG] ensureSession: pollUntilReady result: status=${state.status}, instanceId=${state.instanceId}, countryBlockReason=${state.countryBlockReason || 'none'}, accessTier=${state.accessTier || 'none'}`);
+        logDebug(`ensureSession: pollUntilReady result: status=${state.status}, instanceId=${state.instanceId}, countryBlockReason=${state.countryBlockReason || 'none'}, accessTier=${state.accessTier || 'none'}`);
 
         const instanceID = (state.instanceId || '').trim();
         if (!instanceID) throw new Error('free session active response missing instanceId');
         const session = this._sessionFromState(state);
+        const rl = state.rateLimit;
+        if (rl && rl.rateLimitsByModel && rl.recentCount >= rl.limit) {
+          const reqModelCount = rl.rateLimitsByModel[requestedModel];
+          if (!reqModelCount || reqModelCount.recentCount >= reqModelCount.limit) {
+            const available = Object.entries(rl.rateLimitsByModel)
+              .filter(([m, d]) => d.recentCount < d.limit)
+              .map(([m]) => m);
+            if (available.length > 0 && !available.includes(requestedModel)) {
+              logInfo(`${key.substring(0, 20)}...: model ${requestedModel} at quota, falling back to ${available[0]}`);
+              await this.endAllSessionsForToken(token);
+              try { await this.client.endSession(token); } catch (_) {}
+              model = available[0];
+              key = this.sessionKey(token, model);
+              state = await this.client.createSession(token, model);
+              state = await this.pollUntilReady(token, model, state);
+              const newInstanceID = (state.instanceId || '').trim();
+              if (!newInstanceID) throw new Error('free session fallback missing instanceId');
+              Object.assign(session, this._sessionFromState(state));
+            }
+          }
+        }
         const boundModel = session.model;
         let returnModel = model;
         if (boundModel && boundModel !== requestedModel) {
-          console.log(`${key.substring(0, 20)}...: server bound session to ${boundModel} (requested ${requestedModel}), accepting bound model`);
+          logInfo(`${key.substring(0, 20)}...: server bound session to ${boundModel} (requested ${requestedModel}), accepting bound model`);
           await this.withLock(async () => { this.lockedModels.set(token, boundModel); });
           const boundKey = this.sessionKey(token, boundModel);
           await this.withLock(async () => { this.sessions.delete(key); this.sessions.set(boundKey, session); });
+          this.persistState();
           returnModel = boundModel;
         } else {
           await this.withLock(async () => { this.sessions.set(key, session); });
+          this.persistState();
         }
-        console.log(`[DEBUG] ensureSession: returning instanceID=${instanceID} model=${returnModel} accessTier=${session.accessTier}`);
+        logDebug(`ensureSession: returning instanceID=${instanceID} model=${returnModel} accessTier=${session.accessTier}`);
         return { instanceID, model: returnModel, accessTier: session.accessTier };
       } catch (e) {
         const errorMsg = e.message || '';
@@ -1169,7 +1367,7 @@ class TokenPool {
           let lockedModel = null;
           try { const parsed = JSON.parse(errorMsg); if (parsed.type === 'model_locked' && parsed.body && parsed.body.currentModel) lockedModel = parsed.body.currentModel; } catch (_) {}
           if (lockedModel) {
-            console.log(`${key.substring(0, 20)}...: server locked to ${lockedModel}, switching to locked model`);
+            logInfo(`${key.substring(0, 20)}...: server locked to ${lockedModel}, switching to locked model`);
             await this.endAllSessionsForToken(token);
             try { await this.client.endSession(token); } catch (_) {}
             try {
@@ -1184,32 +1382,40 @@ class TokenPool {
                   this.lockedModels.set(token, lockedModel);
                   this.sessions.set(newKey, session);
                 });
-                console.log(`[DEBUG] ensureSession: switched to locked model ${lockedModel} instanceID=${instanceID}`);
+                this.persistState();
+                logDebug(`ensureSession: switched to locked model ${lockedModel} instanceID=${instanceID}`);
                 return { instanceID, model: lockedModel, accessTier: session.accessTier };
               }
             } catch (switchErr) {
-              console.error(`${key.substring(0, 20)}...: failed to switch to locked model ${lockedModel} (${switchErr.message}), retrying`);
+              logError(`${key.substring(0, 20)}...: failed to switch to locked model ${lockedModel} (${switchErr.message}), retrying`);
             }
             const newKey = this.sessionKey(token, lockedModel);
             await this.withLock(async () => { this.sessions.delete(key); this.lockedModels.set(token, lockedModel); });
+            this.persistState();
             model = lockedModel;
             key = newKey;
             continue;
           }
-          console.log(`${key.substring(0, 20)}...: session locked to different model, ending all upstream sessions`);
+          logInfo(`${key.substring(0, 20)}...: session locked to different model, ending all upstream sessions`);
           await this.endAllSessionsForToken(token);
-          try { await this.client.endSession(token); } catch (e2) { console.error(`endSession(no-id) failed: ${e2.message}`); }
+          try { await this.client.endSession(token); } catch (e2) { logError(`endSession(no-id) failed: ${e2.message}`); }
           await new Promise(r => setTimeout(r, 500));
           continue;
         }
         if (errorMsg === 'freebuff_update_required') {
-          console.log(`${key.substring(0, 20)}...: freebuff_update_required, clearing session and retrying`);
+          logInfo(`${key.substring(0, 20)}...: freebuff_update_required, clearing session and retrying`);
           await this.endAllSessionsForToken(token);
-          try { await this.client.endSession(token); } catch (e2) { console.error(`endSession(no-id) failed: ${e2.message}`); }
+          try { await this.client.endSession(token); } catch (e2) { logError(`endSession(no-id) failed: ${e2.message}`); }
           continue;
         }
         await this.withLock(async () => { this.sessions.delete(key); });
-        console.error(`${key.substring(0, 20)}...: session error: ${e.message}`);
+        this.persistState();
+        logError(`${key.substring(0, 20)}...: session error: ${e.message}`);
+
+        if (errorMsg.includes('429') || errorMsg.includes('rate_limited')) {
+          throw e;
+        }
+
         if (i === 2) throw e;
       }
     }
@@ -1221,6 +1427,7 @@ class TokenPool {
 
   async setLockedModel(token, model) {
     await this.withLock(async () => { this.lockedModels.set(token, model); });
+    this.persistState();
   }
 
   async clearLockedModel(token) {
@@ -1231,8 +1438,9 @@ class TokenPool {
     });
     if (result) {
       await this.endAllSessionsForToken(token);
-      try { await this.client.endSession(token); } catch (e) { console.error(`endSession(no-id) failed: ${e.message}`); }
+      try { await this.client.endSession(token); } catch (e) { logError(`endSession(no-id) failed: ${e.message}`); }
     }
+    this.persistState();
     return result;
   }
 
@@ -1249,8 +1457,9 @@ class TokenPool {
     }
     for (const { token } of all) {
       await this.endAllSessionsForToken(token);
-      try { await this.client.endSession(token); } catch (e) { console.error(`endSession(no-id) failed: ${e.message}`); }
+      try { await this.client.endSession(token); } catch (e) { logError(`endSession(no-id) failed: ${e.message}`); }
     }
+    this.persistState();
     return all;
   }
 
@@ -1269,11 +1478,12 @@ class TokenPool {
         try {
           await this.client.endSession(token, session.instanceID);
         } catch (e) {
-          console.error(`Failed to end session ${session.instanceID}: ${e.message}`);
+          logError(`Failed to end session ${session.instanceID}: ${e.message}`);
         }
       }
       await this.withLock(async () => { this.sessions.delete(key); });
     }
+    this.persistState();
   }
 
   async pollUntilReady(token, model, state) {
@@ -1285,7 +1495,7 @@ class TokenPool {
         if (!instanceID) throw new Error('free session queued response missing instanceId');
         const estimatedWaitMs = state.estimatedWaitMs || 0;
         const delay = estimatedWaitMs > 0 ? Math.min(Math.max(estimatedWaitMs, 250), 2000) : 250;
-        console.log(`Waiting room: position ${state.position || '?'}/${state.queueDepth || '?'}${estimatedWaitMs > 0 ? `, ~${Math.ceil(estimatedWaitMs / 1000)}s` : ''}`);
+        logInfo(`Waiting room: position ${state.position || '?'}/${state.queueDepth || '?'}${estimatedWaitMs > 0 ? `, ~${Math.ceil(estimatedWaitMs / 1000)}s` : ''}`);
         await new Promise(r => setTimeout(r, delay));
         state = await this.client.getSession(token, instanceID);
       } else if (status === 'ended' || status === 'superseded' || status === 'none') {
@@ -1301,7 +1511,75 @@ class TokenPool {
 
   invalidateSession(token, model) {
     const key = this.sessionKey(token, model);
-    this.withLock(async () => { this.sessions.delete(key); });
+    this.withLock(async () => { this.sessions.delete(key); }).then(() => this.persistState());
+  }
+
+  getTokenHealth(token) {
+    return this.tokenHealth.get(token) || { status: 'unknown', error: null, checkedAt: null };
+  }
+
+  setTokenHealth(token, result) {
+    this.tokenHealth.set(token, {
+      status: result.status || 'unknown',
+      error: result.error || null,
+      checkedAt: result.checkedAt || new Date().toISOString()
+    });
+    this.persistState();
+  }
+
+  getAllTokenHealth() {
+    const map = {};
+    for (const [token, health] of this.tokenHealth.entries()) {
+      map[token] = health;
+    }
+    return map;
+  }
+
+  hasUsableTokens() {
+    for (const token of this.tokens) {
+      const health = this.tokenHealth.get(token) || { status: 'unknown' };
+      if (health.status !== 'banned' && health.status !== 'unauthorized') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  getSessionForToken(token) {
+    for (const [key, session] of this.sessions.entries()) {
+      if (key.startsWith(token + ':') && session.status === 'active') return session;
+    }
+    return null;
+  }
+
+  getAggregatedUsage() {
+    let totalUsed = 0;
+    let totalLimit = 0;
+    let earliestReset = null;
+    let windowHours = 24;
+    for (const token of this.tokens) {
+      const session = this.getSessionForToken(token);
+      if (session && session.rateLimit) {
+        totalUsed += session.rateLimit.recentCount || 0;
+        totalLimit += session.rateLimit.limit || 0;
+        if (session.rateLimit.resetAt) {
+          const resetTime = new Date(session.rateLimit.resetAt).getTime();
+          if (!earliestReset || resetTime < earliestReset) earliestReset = resetTime;
+        }
+        if (session.rateLimit.windowHours) windowHours = Math.min(windowHours, session.rateLimit.windowHours);
+      }
+    }
+    const remaining = totalLimit - totalUsed;
+    const burnRate = windowHours > 0 && totalUsed > 0 ? totalUsed / windowHours : 0;
+    const estimatedDepletionMinutes = burnRate > 0 && remaining > 0 ? Math.round(remaining / burnRate * 60) : null;
+    return {
+      used: totalUsed,
+      limit: totalLimit,
+      remaining,
+      nextResetAt: earliestReset ? new Date(earliestReset).toISOString() : null,
+      burnRate: Math.round(burnRate * 100) / 100,
+      estimatedDepletionMinutes
+    };
   }
 }
 
@@ -1329,7 +1607,7 @@ async function finalizeRunChainNormal(client, token, run, messageId) {
   try {
     await client.recordRunStep(token, run.runId, 2, [], messageId, run.startedAt);
     await client.finishRun(token, run.runId, 3);
-  } catch (e) { console.error(`finalize run failed: ${e.message}`); }
+  } catch (e) { logError(`finalize run failed: ${e.message}`); }
 }
 
 async function finalizeRunChainGemini(client, token, run, messageId) {
@@ -1338,7 +1616,7 @@ async function finalizeRunChainGemini(client, token, run, messageId) {
     await client.finishRun(token, run.chatRunId, 2);
     await client.recordRunStep(token, run.runId, 1, [run.chatRunId], null, run.startedAt);
     await client.finishRun(token, run.runId, 2);
-  } catch (e) { console.error(`finalize gemini run failed: ${e.message}`); }
+  } catch (e) { logError(`finalize gemini run failed: ${e.message}`); }
 }
 
 async function startRunChainSimple(client, token, agentID) {
@@ -1351,7 +1629,7 @@ async function finalizeRunChainSimple(client, token, run, messageId) {
   try {
     await client.recordRunStep(token, run.runId, 1, [], messageId, run.startedAt);
     await client.finishRun(token, run.runId, 2);
-  } catch (e) { console.error(`finalize simple run failed: ${e.message}`); }
+  } catch (e) { logError(`finalize simple run failed: ${e.message}`); }
 }
 
 function isGeminiModel(canonicalModel) {
@@ -1564,9 +1842,14 @@ async function handleHealthz(req, res) {
     }
     const bestSession = allSessions.find(s => s.status === 'active') || allSessions[0] || null;
     const lockedModel = tokenPool.lockedModels.get(token) || null;
+    const health = tokenPool.getTokenHealth(token);
+    const rl = bestSession?.rateLimit;
     return {
       name: `token-${idx + 1}`,
       token: maskedToken,
+      health_status: health.status,
+      health_error: health.error,
+      health_checked_at: health.checkedAt,
       session_status: bestSession?.status || 'none',
       session_instance_id: bestSession?.instanceID || null,
       session_expires_at: bestSession?.expiresAt || null,
@@ -1575,16 +1858,33 @@ async function handleHealthz(req, res) {
       country_block_reason: bestSession?.countryBlockReason || null,
       remaining_ms: bestSession?.remainingMs || null,
       locked_model: lockedModel,
-      runs: []
+      runs: [],
+      rate_limit: rl ? {
+        model: rl.model,
+        recentCount: rl.recentCount,
+        limit: rl.limit,
+        resetAt: rl.resetAt,
+        windowHours: rl.windowHours,
+        entitlement: rl.entitlement
+      } : null
     };
   });
+  const usableCount = tokenPool.tokens.filter(t => {
+    const h = tokenPool.getTokenHealth(t);
+    return h.status !== 'banned' && h.status !== 'unauthorized';
+  }).length;
+  const usage = tokenPool.getAggregatedUsage();
   writeJSON(res, 200, {
     ok: true, started_at: startTime.toISOString(),
     uptime_sec: Math.floor((Date.now() - startTime.getTime()) / 1000),
     token_state: tokenState,
     models_count: modelRegistry.getModels().length,
-    valid_tokens: tokenPool.tokens.length,
+    usage,
+    total_tokens: tokenPool.tokens.length,
+    usable_tokens: usableCount,
+    dead_tokens: tokenPool.tokens.length - usableCount,
     locked_tokens: tokenState.filter(t => t.locked_model).length,
+    model_mismatches: MODEL_MISMATCH_LOG.slice(0, 10),
     runtime: IS_BUN ? 'bun' : 'node',
     runtime_version: RUNTIME_VERSION
   });
@@ -1644,6 +1944,20 @@ function countOpenAIPayloadTokens(model, payload) {
 async function proxyChatRequest(res, payload, requestedModel, writeError, writeUpstreamError, writeSuccess) {
   const reqStart = Date.now();
 
+  if (!tokenPool.hasUsableTokens()) {
+    const health = tokenPool ? tokenPool.getAllTokenHealth() : {};
+    const deadSummary = Object.values(health).reduce((acc, h) => {
+      if (h.status === 'banned' || h.status === 'unauthorized') acc[h.status] = (acc[h.status] || 0) + 1;
+      return acc;
+    }, {});
+    let msg = 'No usable authentication tokens';
+    if (deadSummary.banned || deadSummary.unauthorized) {
+      msg += `: ${deadSummary.banned || 0} banned, ${deadSummary.unauthorized || 0} unauthorized`;
+    }
+    writeError(res, 503, msg, 'server_error', 'no_usable_tokens');
+    return;
+  }
+
   const token = tokenPool.getToken();
   if (!token) { writeError(res, 503, 'no authentication tokens configured', 'server_error', 'no_tokens'); return; }
   const client = tokenPool.client;
@@ -1654,18 +1968,63 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
 
   let currentModel = requestedModel;
   let mismatchUnlockAttempted = false;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let currentToken = token;
+  const triedTokens = new Set([token]);
+  let lastRateLimitError = null;
+
+  // Phase 1: try all tokens with the requested model
+  for (let attempt = 0; attempt < 10; attempt++) {
     let sessionInstanceID;
     let actualModel = currentModel;
     let accessTier = null;
     try {
-      const session = await tokenPool.ensureSession(token, currentModel);
+      const session = await tokenPool.ensureSession(currentToken, currentModel);
       sessionInstanceID = session.instanceID;
       actualModel = session.model;
       accessTier = session.accessTier;
+      lastRateLimitError = null;
     } catch (e) {
+      const isRateLimited = e.message && (e.message.includes('429') || e.message.includes('rate_limited'));
+      if (isRateLimited) {
+        lastRateLimitError = e;
+        // Reload pool in case hot-reload added new tokens
+        const preReloadTried = triedTokens.size;
+        if (tokenPool.tokens.length > preReloadTried) {
+          logInfo(`[Token Rotate] Pool has ${tokenPool.tokens.length} tokens but only ${preReloadTried} tried, checking for new tokens...`);
+        }
+        const nextToken = tokenPool.getToken();
+        if (nextToken && !triedTokens.has(nextToken)) {
+          logInfo(`[Token Rotate] ${currentToken.substring(0, 8)}... rate limited on ${currentModel}, trying ${nextToken.substring(0, 8)}...`);
+          triedTokens.add(nextToken);
+          currentToken = nextToken;
+          await new Promise(r => setTimeout(r, 300));
+          continue;
+        }
+        // All known tokens tried — check if pool grew (hot-reload)
+        if (tokenPool.tokens.length > triedTokens.size) {
+          for (const t of tokenPool.tokens) {
+            if (!triedTokens.has(t)) {
+              const h = tokenPool.getTokenHealth(t);
+              if (h.status !== 'banned' && h.status !== 'unauthorized') {
+                logInfo(`[Token Rotate] Found new token ${t.substring(0, 8)}... from hot-reload, trying it`);
+                triedTokens.add(t);
+                currentToken = t;
+                await new Promise(r => setTimeout(r, 300));
+                continue;
+              }
+            }
+          }
+          // If we found a new token above, continue the outer loop
+          if (currentToken !== token || triedTokens.size > preReloadTried + 1) continue;
+        }
+        break;
+      }
       writeError(res, 502, `failed to acquire upstream free session: ${e.message}`, 'server_error', '');
       return;
+    }
+
+    if (actualModel !== requestedModel) {
+      logModelMismatch(requestedModel, actualModel, 'session_created_with_different_model', tokenPool.tokens.indexOf(currentToken));
     }
 
     const canonicalModel = canonicalModelName(actualModel);
@@ -1680,9 +2039,9 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
       if (isGemini) {
         geminiSubagent = getGeminiSubagentId(canonicalModel);
         geminiParentAgent = GEMINI_PARENT_AGENT_ID;
-        run = await startRunChainGemini(client, token, geminiParentAgent, geminiSubagent);
+        run = await startRunChainGemini(client, currentToken, geminiParentAgent, geminiSubagent);
       } else {
-        run = await startRunChainNormal(client, token, agentID);
+        run = await startRunChainNormal(client, currentToken, agentID);
       }
     } catch (e) {
       writeError(res, 502, `failed to start run chain: ${e.message}`, 'server_error', '');
@@ -1691,9 +2050,9 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
 
     const requestedDisplay = actualModel !== requestedModel ? ` (locked from ${requestedModel})` : '';
     const chatRunId = isGemini ? run.chatRunId : run.runId;
-    console.log(`[Request] model: ${actualModel}${requestedDisplay}, run: ${run.runId}${isGemini ? ` (child: ${chatRunId})` : ''}, tier: ${accessTier || 'normal'}`);
+    logInfo(`[Request] model: ${actualModel}${requestedDisplay}, run: ${run.runId}${isGemini ? ` (child: ${chatRunId})` : ''}, tier: ${accessTier || 'normal'}`);
     const userMsg = (payload.messages || []).find(m => m.role === 'user');
-    if (userMsg) console.log(`[Prompt] ${typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content)}`);
+    if (userMsg) logDebug(`[Prompt] ${typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content)}`);
 
     const normalizedMessages = normalizeChatMessages(payload.messages);
     const cloned = cloneMap(payload);
@@ -1718,25 +2077,33 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     cloned.provider = { data_collection: 'deny' };
     if (!cloned.stop) cloned.stop = ['cb_easp'];
 
+    if (cloned.reasoning_effort !== undefined && cloned.reasoning && cloned.reasoning.effort !== undefined) {
+      if (cloned.reasoning_effort !== cloned.reasoning.effort) {
+        logDebug(`[Normalize] Conflicting reasoning_effort (${cloned.reasoning_effort}) vs reasoning.effort (${cloned.reasoning.effort}), keeping reasoning_effort`);
+      }
+      delete cloned.reasoning.effort;
+      if (Object.keys(cloned.reasoning).length === 0) delete cloned.reasoning;
+    }
+
     let resp;
-    try { resp = await client.chatCompletions(token, cloned); } catch (e) {
+    try { resp = await client.chatCompletions(currentToken, cloned); } catch (e) {
       writeError(res, 502, e.message, 'server_error', '');
       return;
     }
 
     if (resp.status === 429) {
       const errorBodyStr = await readBodyText(resp.body);
-      console.log(`[Rate Limit] 429: ${errorBodyStr.substring(0, 200)}`);
+      logWarn(`[Rate Limit] 429: ${errorBodyStr.substring(0, 200)}`);
       for (let retry = 0; retry < 3; retry++) {
         const waitMs = (retry + 1) * 3000;
-        console.log(`[Rate Limit] Waiting ${waitMs / 1000}s before retry ${retry + 1}/3...`);
+        logInfo(`[Rate Limit] Waiting ${waitMs / 1000}s before retry ${retry + 1}/3...`);
         await new Promise(r => setTimeout(r, waitMs));
-        try { resp = await client.chatCompletions(token, cloned); } catch (e) {
+        try { resp = await client.chatCompletions(currentToken, cloned); } catch (e) {
           writeError(res, 502, e.message, 'server_error', '');
           return;
         }
         if (resp.status !== 429) break;
-        console.log(`[Rate Limit] Still 429 on retry ${retry + 1}`);
+        logWarn(`[Rate Limit] Still 429 on retry ${retry + 1}`);
       }
       if (resp.status === 429) {
         const finalBody = await readBodyText(resp.body);
@@ -1748,14 +2115,14 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     if (resp.status >= 200 && resp.status < 300) {
       let messageId = null;
       let actualResponseModel = null;
-      try { const result = await writeSuccess(res, resp); messageId = result.messageId; actualResponseModel = result.model; } catch (e) { console.error(`proxy response copy failed: ${e.message}`); }
-      console.log(`[Response] model: ${actualResponseModel || actualModel}, completed in ${Date.now() - reqStart}ms (status: ${resp.status})`);
-      setImmediate(() => isGemini ? finalizeRunChainGemini(client, token, run, messageId) : finalizeRunChainNormal(client, token, run, messageId));
+      try { const result = await writeSuccess(res, resp); messageId = result.messageId; actualResponseModel = result.model; } catch (e) { logError(`proxy response copy failed: ${e.message}`); }
+      logInfo(`[Response] model: ${actualResponseModel || actualModel}, completed in ${Date.now() - reqStart}ms (status: ${resp.status})`);
+      setImmediate(() => isGemini ? finalizeRunChainGemini(client, currentToken, run, messageId) : finalizeRunChainNormal(client, currentToken, run, messageId));
       return;
     }
 
     const errorBodyStr = await readBodyText(resp.body);
-    console.log(`[Upstream Error] ${resp.status}: ${errorBodyStr.substring(0, 200)}`);
+    logError(`[Upstream Error] ${resp.status}: ${errorBodyStr.substring(0, 200)}`);
 
     if (isSessionInvalid(resp.status, errorBodyStr)) {
       let errorType = '';
@@ -1770,7 +2137,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
             if (match) lockedModel = match[1].replace(/;.*$/, '').replace(/\.$/, '');
           }
           if (!lockedModel) {
-            const cached = await tokenPool.getLockedModel(token);
+            const cached = await tokenPool.getLockedModel(currentToken);
             if (cached) lockedModel = cached;
           }
           if (!lockedModel) {
@@ -1778,37 +2145,124 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
           }
         }
       } catch (e) {}
-      console.log(`[Session Invalid] status=${resp.status}, error=${errorType}${lockedModel ? ', lockedModel=' + lockedModel : ''}`);
+      logWarn(`[Session Invalid] status=${resp.status}, error=${errorType}${lockedModel ? ', lockedModel=' + lockedModel : ''}`);
       
-      if (errorType === 'freebuff_update_required' || resp.status === 426) {
-        console.log(`[Version] Server requires update, invalidating session and retrying...`);
+      if (errorType === 'session_superseded') {
+        logModelMismatch(requestedModel, actualModel, 'session_superseded', tokenPool.tokens.indexOf(currentToken));
       }
-      tokenPool.invalidateSession(token, actualModel);
-      if (requestedModel !== actualModel) tokenPool.invalidateSession(token, requestedModel);
+
+      if (errorType === 'freebuff_update_required' || resp.status === 426) {
+        logWarn(`[Version] Server requires update, invalidating session and retrying...`);
+      }
+      tokenPool.invalidateSession(currentToken, actualModel);
+      if (requestedModel !== actualModel) tokenPool.invalidateSession(currentToken, requestedModel);
 
       if (errorType === 'session_model_mismatch' && lockedModel && lockedModel !== requestedModel && !mismatchUnlockAttempted) {
         mismatchUnlockAttempted = true;
-        console.log(`[Model Lock] Mismatch: session bound to ${lockedModel}. Ending session to unlock and retrying requested model ${requestedModel}`);
-        await tokenPool.clearLockedModel(token);
+        logModelMismatch(requestedModel, lockedModel, 'session_model_mismatch_unlock_retry', tokenPool.tokens.indexOf(currentToken));
+        logInfo(`[Model Lock] Mismatch: session bound to ${lockedModel}. Ending session to unlock and retrying requested model ${requestedModel}`);
+        await tokenPool.clearLockedModel(currentToken);
         currentModel = requestedModel;
         continue;
       }
       if (lockedModel) {
-        console.log(`[Model Lock] Switching from ${currentModel} to ${lockedModel}`);
-        await tokenPool.setLockedModel(token, lockedModel);
-        tokenPool.invalidateSession(token, lockedModel);
+        logModelMismatch(currentModel, lockedModel, 'model_locked_fallback', tokenPool.tokens.indexOf(currentToken));
+        logInfo(`[Model Lock] Switching from ${currentModel} to ${lockedModel}`);
+        await tokenPool.setLockedModel(currentToken, lockedModel);
+        tokenPool.invalidateSession(currentToken, lockedModel);
         currentModel = lockedModel;
       }
       continue;
     }
 
     if (isRunInvalid(resp.status, errorBodyStr)) {
-      console.log(`run ${run.runId} invalid, retrying`);
+      logWarn(`run ${run.runId} invalid, retrying`);
       continue;
     }
 
-    console.error(`upstream error response: ${errorBodyStr}`);
+    logError(`upstream error response: ${errorBodyStr}`);
     writeUpstreamError(res, resp.status, errorBodyStr);
+    return;
+  }
+
+  // Phase 2: all tokens exhausted for requested model, try fallback models
+  if (lastRateLimitError) {
+    const allModels = modelRegistry.getModels();
+    const fallbackCandidates = allModels
+      .filter(m => m !== requestedModel && !m.includes('gemini'))
+      .slice(0, 5);
+    const fallbackToken = tokenPool.getToken() || token;
+    for (const candidate of fallbackCandidates) {
+      try {
+        logInfo(`[Fallback] All tokens rate limited on ${requestedModel}, trying model ${candidate}`);
+        const session = await tokenPool.ensureSession(fallbackToken, candidate);
+        logModelMismatch(requestedModel, candidate, 'rate_limit_fallback', tokenPool.tokens.indexOf(fallbackToken));
+        currentModel = candidate;
+        currentToken = fallbackToken;
+        mismatchUnlockAttempted = false;
+        // Re-enter the main flow with the fallback model
+        const canonicalModel = canonicalModelName(candidate);
+        const agentID = modelRegistry.getAgentForModel(canonicalModel) || FALLBACK_AGENT_IDS[canonicalModel] || 'base2-free';
+        const isGemini = isGeminiModel(canonicalModel);
+        let run;
+        try {
+          if (isGemini) {
+            const geminiSubagent = getGeminiSubagentId(canonicalModel);
+            const geminiParentAgent = GEMINI_PARENT_AGENT_ID;
+            run = await startRunChainGemini(client, currentToken, geminiParentAgent, geminiSubagent);
+          } else {
+            run = await startRunChainNormal(client, currentToken, agentID);
+          }
+        } catch (e) {
+          logWarn(`[Fallback] run chain failed for ${candidate}: ${e.message}`);
+          continue;
+        }
+        const normalizedMessages = normalizeChatMessages(payload.messages);
+        const cloned = cloneMap(payload);
+        cloned.model = candidate;
+        cloned.messages = normalizedMessages;
+        if (cloned.tools) normalizeToolSchemas(cloned.tools);
+        const clientId = generateClientSessionId();
+        const traceSessionId = crypto.randomUUID();
+        if (cloned.stream === undefined) cloned.stream = true;
+        delete cloned.codebuff;
+        delete cloned.codebuff_metadata;
+        delete cloned.provider;
+        cloned.codebuff_metadata = {
+          freebuff_instance_id: session.instanceID,
+          trace_session_id: traceSessionId,
+          run_id: isGemini ? run.chatRunId : run.runId,
+          client_id: clientId,
+          cost_mode: 'free',
+        };
+        cloned.provider = { data_collection: 'deny' };
+        if (!cloned.stop) cloned.stop = ['cb_easp'];
+        if (cloned.reasoning_effort !== undefined && cloned.reasoning && cloned.reasoning.effort !== undefined) {
+          delete cloned.reasoning.effort;
+          if (Object.keys(cloned.reasoning).length === 0) delete cloned.reasoning;
+        }
+        let resp;
+        try { resp = await client.chatCompletions(currentToken, cloned); } catch (e) {
+          logWarn(`[Fallback] chat request failed for ${candidate}: ${e.message}`);
+          continue;
+        }
+        if (resp.status >= 200 && resp.status < 300) {
+          let messageId = null;
+          let actualResponseModel = null;
+          try { const result = await writeSuccess(res, resp); messageId = result.messageId; actualResponseModel = result.model; } catch (e) { logError(`proxy response copy failed: ${e.message}`); }
+          logInfo(`[Response] model: ${actualResponseModel || candidate}, completed in ${Date.now() - reqStart}ms (status: ${resp.status}) [fallback]`);
+          setImmediate(() => isGemini ? finalizeRunChainGemini(client, currentToken, run, messageId) : finalizeRunChainNormal(client, currentToken, run, messageId));
+          return;
+        }
+        logWarn(`[Fallback] ${candidate} returned ${resp.status}`);
+      } catch (fbErr) {
+        if (fbErr.message.includes('429')) continue;
+        break;
+      }
+    }
+    logModelMismatch(requestedModel, requestedModel, 'rate_limit_all_exhausted', tokenPool.tokens.indexOf(token));
+    const finalBody = lastRateLimitError.message || 'rate limited';
+    writeUpstreamError(res, 429, finalBody);
     return;
   }
 
@@ -2019,10 +2473,14 @@ function writeClaudePassthroughError(res, statusCode, body) {
 
 // --- Token Validation ---
 async function validateToken(token) {
+  const now = new Date().toISOString();
   try {
     const client = new UpstreamClient(config);
     let session = await client.createSession(token);
-    return session && session.status === 'active';
+    if (session && session.status === 'active') {
+      return { valid: true, status: 'active', error: null, checkedAt: now, lockedModel: session.model || null };
+    }
+    return { valid: false, status: 'unknown', error: `unexpected session status: ${session ? session.status : 'empty'}`, checkedAt: now };
   } catch (e) {
     let lockedModel = null;
     try { const parsed = JSON.parse(e.message); if (parsed.type === 'model_locked' && parsed.body && parsed.body.currentModel) lockedModel = parsed.body.currentModel; } catch (_) {}
@@ -2030,25 +2488,37 @@ async function validateToken(token) {
       try {
         const client2 = new UpstreamClient(config);
         const session = await client2.createSession(token, lockedModel);
-        return session && session.status === 'active';
+        if (session && session.status === 'active') {
+          return { valid: true, status: 'active', error: null, checkedAt: now, lockedModel };
+        }
+        return { valid: false, status: 'unknown', error: `locked model ${lockedModel} not active`, checkedAt: now };
       } catch (e2) {
-        console.error(`Token validation error for ${token.substring(0, 8)}... (tried locked model ${lockedModel}): ${e2.message}`);
-        return false;
+        logError(`Token validation error for ${token.substring(0, 8)}... (tried locked model ${lockedModel}): ${e2.message}`);
+        return { valid: false, status: classifyTokenError(e2), error: e2.message, checkedAt: now };
       }
     }
-    console.error(`Token validation error for ${token.substring(0, 8)}...: ${e.message}`);
-    return false;
+    const status = classifyTokenError(e);
+    logError(`Token validation error for ${token.substring(0, 8)}...: ${e.message}`);
+    return { valid: false, status, error: e.message, checkedAt: now };
   }
 }
 
+function classifyTokenError(e) {
+  const msg = (e && e.message) || String(e);
+  if (msg.includes('403') && msg.includes('banned')) return 'banned';
+  if (msg.includes('401') || msg.includes('Invalid API key') || msg.includes('unauthorized')) return 'unauthorized';
+  if (msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('network') || msg.includes('fetch failed')) return 'network_error';
+  return 'unknown';
+}
+
 async function validateAllTokens() {
-  if (!config.authTokens || config.authTokens.length === 0) { console.log('No auth tokens configured'); return []; }
+  if (!config.authTokens || config.authTokens.length === 0) { logWarn('No auth tokens configured'); return []; }
   const results = [];
   for (const token of config.authTokens) {
-    const valid = await validateToken(token);
-    results.push({ token: token.substring(0, 8) + '...' + token.substring(token.length - 4), valid: !!valid });
-    if (valid) console.log(`Token ${token.substring(0, 8)}... is valid`);
-    else console.log(`Token ${token.substring(0, 8)}... is INVALID`);
+    const result = await validateToken(token);
+    results.push({ token, ...result });
+    if (result.valid) logInfo(`Token ${token.substring(0, 8)}... is valid`);
+    else logWarn(`Token ${token.substring(0, 8)}... is INVALID (${result.status})`);
   }
   return results;
 }
@@ -2056,8 +2526,14 @@ async function validateAllTokens() {
 async function reloadTokenPool() {
   config = loadConfig();
   const client = new UpstreamClient(config);
+  const previousHealth = tokenPool ? tokenPool.getAllTokenHealth() : {};
   tokenPool = new TokenPool(config.authTokens, config, client);
-  console.log(`TokenPool reloaded with ${config.authTokens.length} token(s)`);
+  for (const [token, health] of Object.entries(previousHealth)) {
+    if (config.authTokens.includes(token)) {
+      tokenPool.setTokenHealth(token, health);
+    }
+  }
+  logInfo(`TokenPool reloaded with ${config.authTokens.length} token(s)`);
 }
 
 // --- Main Request Handler ---
@@ -2106,7 +2582,7 @@ async function handleRequest(req, res) {
       const data = await resp.json();
       if (data.user && data.user.authToken) {
         if (!config.authTokens) config.authTokens = [];
-        if (!config.authTokens.includes(data.user.authToken)) { config.authTokens.push(data.user.authToken); saveConfig(config); reloadTokenPool(); console.log('New auth token added via OAuth'); }
+        if (!config.authTokens.includes(data.user.authToken)) { config.authTokens.push(data.user.authToken); saveConfig(config); reloadTokenPool(); logInfo('New auth token added via OAuth'); }
         data.tokenAdded = true;
       }
       writeJSON(res, 200, data);
@@ -2143,9 +2619,9 @@ async function handleRequest(req, res) {
       });
       if (!resp.ok) { writeJSON(res, 200, []); return; }
       const data = await resp.json();
-      console.log('[Ads] Response:', JSON.stringify(data).substring(0, 500));
+      logDebug('[Ads] Response:', JSON.stringify(data).substring(0, 500));
       writeJSON(res, 200, data);
-    } catch (e) { console.error('[Ads] Error:', e.message); writeJSON(res, 200, []); }
+    } catch (e) { logError('[Ads] Error:', e.message); writeJSON(res, 200, []); }
     return;
   }
 
@@ -2167,11 +2643,31 @@ async function handleRequest(req, res) {
     return;
   }
 
+  if (pathname === '/api/usage' && req.method === 'GET') {
+    if (!tokenPool) { writeJSON(res, 503, { ok: false, error: 'token pool not ready' }); return; }
+    const tokens = tokenPool.tokens.map((token, idx) => {
+      const session = tokenPool.getSessionForToken(token);
+      const rl = session?.rateLimit;
+      return {
+        name: `token-${idx + 1}`,
+        token: token.substring(0, 8) + '...' + token.substring(token.length - 4),
+        model: rl?.model || null,
+        recentCount: rl?.recentCount || 0,
+        limit: rl?.limit || 0,
+        resetAt: rl?.resetAt || null,
+        entitlement: rl?.entitlement || null,
+        health: tokenPool.getTokenHealth(token)
+      };
+    });
+    writeJSON(res, 200, { tokens, summary: tokenPool.getAggregatedUsage() });
+    return;
+  }
+
   if (pathname === '/api/session/unlock' && req.method === 'POST') {
     if (!tokenPool) { writeJSON(res, 503, { ok: false, error: 'token pool not ready' }); return; }
     try {
       const unlocked = await tokenPool.clearAllLockedModels();
-      console.log(`[Unlock] Cleared locked models for ${unlocked.length} token(s)`);
+        logInfo(`[Unlock] Cleared locked models for ${unlocked.length} token(s)`);
       writeJSON(res, 200, { ok: true, unlocked_count: unlocked.length });
     } catch (e) {
       writeJSON(res, 500, { ok: false, error: e.message });
@@ -2216,6 +2712,53 @@ async function detectCountry() {
   console.log('[Country] Could not detect country');
 }
 
+// --- Token File Watcher ---
+let tokenWatcherDebounce = null;
+function startTokenFileWatcher(paths) {
+  if (!paths || paths.length === 0) return;
+  const watched = new Set();
+  for (const credPath of paths) {
+    if (watched.has(credPath)) continue;
+    try {
+      const watcher = fs.watch(credPath, { persistent: false }, (eventType) => {
+        if (tokenWatcherDebounce) clearTimeout(tokenWatcherDebounce);
+        tokenWatcherDebounce = setTimeout(async () => {
+          logInfo(`[Token Watch] Credential file changed: ${credPath} (${eventType})`);
+          const { tokens: newCliTokens } = loadFreebuffCLITokens();
+          const oldTokens = new Set(config.authTokens || []);
+          const added = newCliTokens.filter(t => !oldTokens.has(t));
+          const removed = [...oldTokens].filter(t => t.startsWith('freebuff_') === false && !newCliTokens.includes(t));
+          if (added.length > 0) {
+            logInfo(`[Token Watch] ${added.length} new token(s) detected`);
+            for (const token of added) {
+              const result = await validateToken(token);
+              if (result.valid) {
+                config.authTokens.push(token);
+                logInfo(`[Token Watch] Added token: ${token.substring(0, 8)}...`);
+              } else {
+                logWarn(`[Token Watch] Skipped invalid token: ${token.substring(0, 8)}... (${result.status})`);
+              }
+            }
+          }
+          if (removed.length > 0) {
+            logInfo(`[Token Watch] ${removed.length} token(s) removed from credentials`);
+            config.authTokens = config.authTokens.filter(t => !removed.includes(t));
+          }
+          if (added.length > 0 || removed.length > 0) {
+            saveConfig(config);
+            await reloadTokenPool();
+            logInfo(`[Token Watch] TokenPool reloaded: ${config.authTokens.length} token(s)`);
+          }
+        }, 1000);
+      });
+      watched.add(credPath);
+      logDebug(`[Token Watch] Watching ${credPath}`);
+    } catch (e) {
+      logWarn(`[Token Watch] Could not watch ${credPath}: ${e.message}`);
+    }
+  }
+}
+
 // --- Server Startup ---
 async function startServer() {
   console.log('╔═══════════════════════════════════════════════════════════════╗');
@@ -2224,9 +2767,11 @@ async function startServer() {
 
   try { config = loadConfig(); } catch (e) { console.error('Failed to load config:', e.message); process.exit(1); }
 
-  const cliTokens = loadFreebuffCLITokens();
+  const cliResult = loadFreebuffCLITokens();
+  const cliTokens = cliResult.tokens;
+  const watchedCredentialPaths = cliResult.watchedPaths;
   if (cliTokens.length > 0) {
-    console.log(`[Config] Found ${cliTokens.length} token(s) in CLI credentials`);
+    logInfo(`[Config] Found ${cliTokens.length} token(s) in CLI credentials`);
     config.authTokens = [...new Set([...(config.authTokens || []), ...cliTokens])];
   }
 
@@ -2237,7 +2782,7 @@ async function startServer() {
   // TEST MOCKS
   if (config.mockCountry) {
     DETECTED_COUNTRY = config.mockCountry;
-    console.log(`[Country] MOCKED to: ${DETECTED_COUNTRY}`);
+    logInfo(`[Country] MOCKED to: ${DETECTED_COUNTRY}`);
   }
 
   modelRegistry = new ModelRegistry();
@@ -2251,26 +2796,29 @@ async function startServer() {
 
   const client = new UpstreamClient(config);
 
-  const tokensToUse = validTokens.length > 0
-    ? validTokens.map(t => {
-        const masked = t.token;
-        return config.authTokens.find(tok => tok.startsWith(masked.substring(0, 8)));
-      }).filter(Boolean)
-    : config.authTokens;
-  tokenPool = new TokenPool(tokensToUse, config, client);
+  // Keep all configured tokens in the pool so the dashboard can show banned/unauthorized ones,
+  // but apply health info so dead tokens are skipped during request routing.
+  tokenPool = new TokenPool(config.authTokens, config, client);
+  for (const result of allTokenResults) {
+    tokenPool.setTokenHealth(result.token, result);
+  }
+  const usableCount = tokenPool.tokens.filter(t => {
+    const h = tokenPool.getTokenHealth(t);
+    return h.status !== 'banned' && h.status !== 'unauthorized';
+  }).length;
 
   if (validTokens.length === 0 && config.authTokens.length > 0) {
-    console.log(`[Warning] No tokens passed validation, using ${config.authTokens.length} configured token(s) anyway`);
+    logWarn(`No tokens passed validation; ${config.authTokens.length} configured token(s) will remain visible but skipped`);
   }
 
   const server = http.createServer(handleRequest);
   server.listen(port, '0.0.0.0', () => {
-    console.log(`\nFreebuff2Opencode Proxy on http://127.0.0.1:${port}`);
-    console.log(`  Upstream: ${config.upstreamBaseURL}`);
-    console.log(`  Models: ${modelRegistry.getModels().length}`);
-    console.log(`  API keys: ${config.apiKeys.length > 0 ? config.apiKeys.length + ' (auth enabled)' : 'none (open access)'}`);
-    console.log(`  Valid tokens: ${validTokens.length}`);
-    console.log('');
+    logInfo(`\nFreebuff2Opencode Proxy on http://127.0.0.1:${port}`);
+    logInfo(`  Upstream: ${config.upstreamBaseURL}`);
+    logInfo(`  Models: ${modelRegistry.getModels().length}`);
+    logInfo(`  API keys: ${config.apiKeys.length > 0 ? config.apiKeys.length + ' (auth enabled)' : 'none (open access)'}`);
+    logInfo(`  Valid tokens: ${validTokens.length} / ${config.authTokens.length}`);
+    logInfo('');
     if (firstRun) {
       const dashboardUrl = `http://localhost:${port}`;
       if (process.platform === 'win32') {
@@ -2283,21 +2831,56 @@ async function startServer() {
     }
   });
 
+  startTokenFileWatcher(watchedCredentialPaths);
+
   setInterval(async () => {
-    const cliTokens = loadFreebuffCLITokens();
-    if (cliTokens.length > 0) {
-      const currentTokens = new Set(config.authTokens || []);
-      const newTokens = cliTokens.filter(t => !currentTokens.has(t));
-      if (newTokens.length > 0) {
-        console.log(`Found ${newTokens.length} new token(s) in CLI credentials`);
-        for (const token of newTokens) {
-          const valid = await validateToken(token);
-          if (valid) { config.authTokens.push(token); console.log(`Added valid token: ${token.substring(0, 8)}...`); }
+    const { tokens: cliTokens } = loadFreebuffCLITokens();
+    const currentTokens = new Set(config.authTokens || []);
+    const newTokens = cliTokens.filter(t => !currentTokens.has(t));
+    const removedTokens = [...currentTokens].filter(t => !cliTokens.includes(t));
+    let changed = false;
+    if (newTokens.length > 0) {
+      logInfo(`Found ${newTokens.length} new token(s) in CLI credentials`);
+      for (const token of newTokens) {
+        const result = await validateToken(token);
+        if (result.valid) {
+          config.authTokens.push(token);
+          logInfo(`Added valid token: ${token.substring(0, 8)}...`);
+          changed = true;
+        } else {
+          logWarn(`Skipped invalid new token: ${token.substring(0, 8)}... (${result.status})`);
         }
-        if (config.authTokens.length > currentTokens.size) { saveConfig(config); await reloadTokenPool(); }
       }
     }
+    if (removedTokens.length > 0) {
+      logInfo(`${removedTokens.length} token(s) removed from CLI credentials`);
+      config.authTokens = config.authTokens.filter(t => !removedTokens.includes(t));
+      changed = true;
+    }
+    if (changed) { saveConfig(config); await reloadTokenPool(); }
   }, TOKEN_RELOAD_INTERVAL);
+
+  // Periodic token re-validation (default every 5 minutes)
+  const revalidationInterval = config.tokenRevalidateInterval || (5 * 60 * 1000);
+  setInterval(async () => {
+    if (!tokenPool || !config.authTokens || config.authTokens.length === 0) return;
+    logInfo('Re-validating configured tokens...');
+    const results = await validateAllTokens();
+    for (const result of results) {
+      const previous = tokenPool.getTokenHealth(result.token);
+      tokenPool.setTokenHealth(result.token, result);
+      if (previous.status !== result.status) {
+        if (result.valid) {
+          logInfo(`Token ${result.token.substring(0, 8)}... became active`);
+        } else {
+          logWarn(`Token ${result.token.substring(0, 8)}... became ${result.status}`);
+        }
+      }
+      if (!result.valid && (result.status === 'banned' || result.status === 'unauthorized')) {
+        await tokenPool.endAllSessionsForToken(result.token);
+      }
+    }
+  }, revalidationInterval);
 
   setInterval(async () => {
     try { await checkAndUpdateVersions(); } catch (e) { /* ignore */ }

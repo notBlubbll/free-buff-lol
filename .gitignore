@@ -1,0 +1,7 @@
+node_modules/
+.config/
+config.json
+*.backup.json
+*.log
+npm-debug.log*
+.env

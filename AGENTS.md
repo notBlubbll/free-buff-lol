@@ -5,7 +5,7 @@
 ```
 FREEBUFF-PROXY/
 ├── proxy.js              # Main proxy implementation (~2218 lines)
-├── dashboard.html        # Liquid glass dashboard with OAuth UI (~1209 lines)
+├── dashboard.html        # Anti-slop glass dashboard, Geist font, pure CSS (~368 lines)
 ├── .config/
 │   └── config.json       # Runtime configuration (auto-created)
 ├── package.json          # Project metadata (freebuff, node-forge, node-fetch, socks-proxy-agent)
@@ -26,21 +26,23 @@ FREEBUFF-PROXY/
 - `CONTEXT_PRUNER_AGENT_ID` — Agent ID for the context-pruner child run
 - `CODEBUFF_ACCEPT_ENCODING`, `CODEBUFF_JSON_USER_AGENT`, `FREEBUFF_CLI_USER_AGENT` — HAR-style header constants
 - `LAST_REQUEST` / `debounceRequest()` — Global request debounce (1.3s minimum gap between requests)
+- `LOG_LEVEL`, `logInfo()`, `logWarn()`, `logError()`, `logDebug()` — Tiered logging system; set via `LOG_LEVEL` env var or config.json `LOG_LEVEL` field (`error`/`warn`/`info`/`debug`). `debug` level restores verbose `[API]` and `[DEBUG]` log lines. `info` is default.
 - `checkAndUpdateVersions()` — Fetches `freebuff2api_rs` source and npm registry to auto-update version strings
 - `checkProxyVersion()` — Checks npm for latest proxy version; shows VBScript MsgBox alert and exits if outdated
 - User-Agent generators: `getApiUserAgent()`, `getChatUserAgent()`, `getAdsUserAgent()`
 
 ### 2. Config System (lines 161-314)
 
-- `loadConfig()` — Loads `.config/config.json` with env var overrides (`LISTEN_ADDR`, `UPSTREAM_BASE_URL`, `REQUEST_TIMEOUT`, `AUTH_TOKENS`, `API_KEYS`, `ENABLED_MODELS`)
+- `loadConfig()` — Loads `.config/config.json` with env var overrides (`LISTEN_ADDR`, `UPSTREAM_BASE_URL`, `REQUEST_TIMEOUT`, `AUTH_TOKENS`, `API_KEYS`, `ENABLED_MODELS`, `LOG_LEVEL`, `TOKEN_REVALIDATE_INTERVAL`)
 - `loadFreebuffCLITokens()` — Reads `~/.config/manicode/credentials.json`, extracts all `authToken` entries
-- `saveConfig()` — Writes current config back to `.config/config.json`; auto-creates `.config/` dir if missing; creates backup (`config.backup.json`) on first write
+- `saveConfig()` — Writes current config back to `.config/config.json`; auto-creates `.config/` dir if missing; creates backup (`config.backup.json`) on first write; includes `LOG_LEVEL` and `TOKEN_REVALIDATE_INTERVAL`
 - `parseDuration()` — Parses duration strings like `15m`, `6h`, `30s`
 - `setupOpencodeConfig()` — Writes/updates opencode provider config:
   - Discovers all `opencode.json` files on the system asynchronously at startup (full-drive search on Windows, full filesystem search elsewhere, using `bash`/`find`)
   - Caches discovered paths so opencode config updates don't rescan the disk
   - Iterates all model registry entries, includes only those in `config.enabledModels`
   - Adds `[LIM]` prefix to `name` for limited (premium) models (same convention as dashboard)
+  - Writes `modalities` (input/output arrays) and `limit` (context/output) per model, not invalid `multimodal`/`free` fields
   - Reads existing opencode.json before overwriting; if `freebuff.provider.models` is non-empty and registry models that are still enabled are missing from it, they're removed from `config.enabledModels` and persisted via `saveConfig()` — this makes manual model removal from opencode.json persist across restarts
   - Normalizes model IDs through `canonicalModelName()` when comparing enabled models against the registry
   - Falls back to writing all registry models when the enabled list would otherwise produce an empty provider (e.g. stale IDs), and logs warnings about any enabled models that don't exist in the registry
@@ -55,7 +57,9 @@ FREEBUFF-PROXY/
 - `parseConstants(source)` — Regex extracts `export const X = 'value'` into a Map
 - `parseAllFreeModels(source, variableMap)` — Regex extracts `'agent-id': new Set([MODEL_VAR, ...])` blocks, resolves variables
 - `buildModelMapping()` — Uses hardcoded `SUPPORTED_MODELS` map (4 models → 4 agents)
-- Result: `modelToAgent` Map, `allModels` array
+- `parseModelMetadata()` — Extracts `displayName`, `premium`, `modalities` (input/output arrays), and `limit` (context/output numbers) from `freebuff-models.ts`
+- `HARDCODED_MODELS` fallback includes `modalities` and `limit` fields for each model, used when GitHub fetch fails
+- Result: `modelToAgent` Map, `allModels` array, `modelMetadata` Map with `{ displayName, premium, modalities, limit }`
 
 ### 4. Message Normalization (lines 605-660)
 
@@ -88,8 +92,12 @@ FREEBUFF-PROXY/
 
 - Manages multiple auth tokens with round-robin selection
 - Mutex-based locking via promise chain (`withLock()`)
-- `ensureSession(token, model)` — Up to 3 retries, handles model_locked and freebuff_update_required. On `model_locked`, attempts to end the existing session and create a fresh one for the requested model before falling back to the locked model
-- Session data stored: `status`, `instanceID`, `expiresAt`, `countryCode`, `remainingMs`, `accessTier`
+- `getToken()` — Usage-aware selection: sorts tokens by remaining session quota descending, skips banned/unauthorized
+- `hasAvailableQuota()` — Returns true if any token has remaining session quota
+- `getAggregatedUsage()` — Sums `recentCount` and `limit` across all tokens, returns `{ used, limit, remaining, nextResetAt }`
+- `getSessionForToken(token)` — Returns active session for a token (includes `rateLimit` data)
+- `ensureSession(token, model)` — Up to 3 retries, handles model_locked and freebuff_update_required. On `model_locked`, attempts to end the existing session and create a fresh one for the requested model before falling back to the locked model. On model at quota: auto-falls back to another model from `rateLimitsByModel`
+- Session data stored: `status`, `instanceID`, `expiresAt`, `countryCode`, `remainingMs`, `accessTier`, `rateLimit` (includes `model`, `entitlement`, `limit`, `period`, `resetAt`, `windowHours`, `recentCount`, `rateLimitsByModel`)
 - `pollUntilReady(token, model, state)` — Polls up to 60 iterations for `active` status, handles `queued`, `ended`, `superseded`, `disabled`
 - `endAllSessionsForToken(token)` — Cleans up all sessions for a token
 - `invalidateSession(token, model)` — Removes specific session from cache
@@ -148,7 +156,7 @@ Finalization:
 - `readBody(req)` — Reads full request body into string
 - `writeJSON(res, statusCode, payload)` — JSON response helper
 - `writeOpenAIError()` / `writeClaudeError()` — Error response formatters
-- `handleHealthz(req, res)` — Returns uptime, token states (with `country_code` and `remaining_ms`), model count, runtime info, and Warp Plus status (with `exit_country` when active)
+- `handleHealthz(req, res)` — Returns uptime, token states (with `country_code` and `remaining_ms`), model count, runtime info, model mismatch log, and Warp Plus status (with `exit_country` when active)
 - `handleModels(req, res)` — OpenAI-format model list
 - `handleChatCompletions(req, res)` — Parses body, calls `proxyChatRequest`
 - `handleClaudeMessages(req, res)` — Converts Anthropic format, calls `proxyChatRequest`
@@ -182,11 +190,25 @@ Finalization:
   - Maps `tool_calls` → `content[{type: 'tool_use', ...}]`
   - Maps `finish_reason` → `stop_reason` (`tool_calls` → `tool_use`, `length` → `max_tokens`)
 
-### 12. Token Validation (lines 1902-1942)
+### 12. Token Health & Validation (lines 2021-2100)
 
-- `validateToken(token)` — Creates session, checks `status === 'active'`. Handles `model_locked` by retrying with locked model.
-- `validateAllTokens()` — Validates all configured tokens sequentially
-- `reloadTokenPool()` — Reloads config and recreates TokenPool
+- `validateToken(token)` — Returns `{valid, status, error, checkedAt, lockedModel}` where `status` is `active`, `banned`, `unauthorized`, `network_error`, or `unknown`
+- `classifyTokenError(e)` — Parses error messages to determine token health status (403→banned, 401→unauthorized, timeout→network_error)
+- `validateAllTokens()` — Validates all tokens and returns health results
+- `reloadTokenPool()` — Reloads config and recreates TokenPool; preserves health data from previous pool
+
+#### TokenPool Health Tracking (lines 1072-1375)
+- All configured tokens remain visible in the pool regardless of health
+- `tokenHealth` Map — Stores `{status, error, checkedAt}` per token (persisted across pool reloads)
+- `getToken()` — Skips tokens with `banned` or `unauthorized` health during round-robin selection
+- `hasUsableTokens()` — Returns `true` if at least one token is not banned/unauthorized
+- `setTokenHealth(token, result)` / `getTokenHealth(token)` — Read/write health state
+
+#### Periodic Re-validation
+- Configurable via `TOKEN_REVALIDATE_INTERVAL` (default: `5m`) in config.json
+- Runs at the configured interval and updates health for all tokens in the pool
+- Logs status transitions (e.g. `"Token abc... became active"` or `"Token abc... became banned"`)
+- Invalidates upstream sessions for newly banned/unauthorized tokens
 
 ### 13. Main Request Router (lines 1944-2060)
 
@@ -198,25 +220,33 @@ Routes by pathname:
 - `/api/auth/status` (POST) → `POST https://freebuff.llm.pm/api/status` + auto-save token
 - `/api/models` (GET) → Registry models
 - `/api/bg` (GET) → Bing wallpaper via peapix.com
+- `/api/usage` (GET) → Per-token usage breakdown with `recentCount`, `limit`, `resetAt`, plus aggregated `summary` (`used`, `limit`, `remaining`, `nextResetAt`)
 - `/api/ads` (GET) → Fetch upstream ads from `/api/v1/ads`
 - `/api/ads/impression` (POST) → Record ad impression
-- `/healthz` → Health check
+- `/healthz` → Health check (returns `token_state[]` with `health_status`, `health_error`, `health_checked_at` per token; includes `total_tokens`, `usable_tokens`, `dead_tokens` counts; includes `model_mismatches` log of recent model fallback events)
 - `/v1/models` → OpenAI models
 - `/v1/chat/completions` → OpenAI chat
 - `/v1/messages` → Anthropic messages
 - `/v1/messages/count_tokens` → Anthropic token counting
 
-### 14. Dashboard (dashboard.html, 1023 lines)
+### 14. Dashboard (dashboard.html, 368 lines)
 
-- **Liquid Glass Engine** — Canvas-generated displacement maps with refraction profiles (`calculateRefractionProfile`, `generateDisplacementMap`, `generateSpecularMap`)
-- **SVG Filter Pipeline** — `feGaussianBlur` → `feDisplacementMap` → `feColorMatrix` → `feComposite` → `feBlend`
+- **Anti-Slop Glass** — Refined `backdrop-filter` glassmorphism with inner highlight borders, inset shadows, and `prefers-reduced-transparency` fallback
+- **Geist Typography** — Geist font from CDN (replaces Inter), no AI-tell
+- **Pure CSS** — Zero Bootstrap dependency, CSS Grid layouts, custom switch toggles, native CSS utility classes
 - **OAuth UI** — `startOAuth()` → polling every 2s for 60 attempts → auto-saves token
 - **Ad System** — `fetchAds()` → `renderAdInTokenCard()` → impression tracking
-- **Country Card** — Displays `country_code` from session response in a stats card
+- **Usage Stats** — Six stat cards: Sessions Used, Remaining, Burn/hr, Resets In (live countdown), Depletion, Country
+- **Per-Token Usage Bar** — Each token card shows a progress bar (`recentCount / limit`) with color coding (green < 80%, orange < 100%, red = full)
 - **Session Countdown** — Live `Xm Ys left` timer in Auth Token Status header, using `remaining_ms` from healthz, decremented every second via `setInterval`
 - **SS Mode** — Blur tokens for screenshots
 - **Auto-refresh** — Health check every 5s, ad rotation every 30s, countdown tick every 1s
 - **Collapsible Sections** — Toggle with icon rotation animation
+- **Reduced Motion** — `prefers-reduced-motion` disables all animations/transitions
+- **Responsive** — CSS Grid with 2/3/6-col stat grid, 2fr/1fr main grid, mobile-first collapse
+- **Focus Visible** — `:focus-visible` outlines for keyboard navigation
+- **Skeleton Loading** — Shimmer animation for loading states
+- **Model Mismatch Notifications** — Detects when upstream uses a different model than requested, shows toast + persistent banner with requested vs actual model details
 
 ## Authentication Flow
 
@@ -339,6 +369,11 @@ netstat -ano | findstr :8080
 taskkill /PID <pid> /F
 ```
 
+### Log Noise / Verbose API Output
+
+Set `LOG_LEVEL=error` or `LOG_LEVEL=warn` in `.config/config.json` to suppress `[API]` and `[DEBUG]` log lines.  
+Use `LOG_LEVEL=debug` to restore verbose logging when troubleshooting upstream calls.
+
 ### Token Validation False Positives
 
 `validateToken()` only accepts `status === 'active'`. Does not accept `disabled` or `queued`.
@@ -422,6 +457,9 @@ Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 |---------|-------|
 | Model registry refresh | 6 hours |
 | Token reload check | 5 minutes |
+| Token re-validation interval | 5 minutes (configurable) |
+| Session poll max iterations | 60 |
+| Session poll delay | 250ms-2s |
 | Version check | 1 hour |
 | Request timeout | 15 minutes |
 | Request debounce | 1.3 seconds |
@@ -453,6 +491,12 @@ Plus Node.js built-ins: `fs`, `path`, `os`, `http`, `https`, `url`, `crypto`.
 - [x] Ad chain + streak — Completes ad flow and streak check before session creation
 - [x] Message normalization — developer→system, Buffy prompt injection
 - [x] Context-pruner run chain — Proper child run lifecycle matching upstream expectations
+- [x] Token health tracking — Banned/unauthorized tokens stay visible, surfaced in /healthz and dashboard
+- [x] Periodic token re-validation — Configurable interval, auto-detects banned tokens mid-session
+- [x] Log level system — LOG_LEVEL env/config (error/warn/info/debug) quietens upstream call noise
+- [x] Usage tracking — rateLimit data stored in session cache; exposed via /healthz and /api/usage; shown in dashboard with progress bars and countdown
+- [x] Usage-aware token selection — `getToken()` prefers tokens with more remaining quota; per-model quota fallback in `ensureSession`
+- [x] Model unlock on request mismatch — Ends locked session and retries requested model, falls back to locked model if rejected
 - [ ] Request/response logging
 - [ ] Metrics export (Prometheus)
 - [ ] Docker containerization

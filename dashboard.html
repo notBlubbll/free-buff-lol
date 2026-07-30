@@ -1,483 +1,350 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Freebuff2OpenCode&thinsp;Dashboard</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <title>Freebuff Proxy Dashboard</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-sans/style.min.css">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-text-size-adjust: 100%; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; scroll-behavior: smooth; }
+    body { font-family: var(--font); font-size: var(--text-base); line-height: 1.5; color: var(--text-primary); background-color: var(--bg-primary); min-height: 100dvh; }
+    img, svg { display: block; max-width: 100%; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    a { color: inherit; text-decoration: none; }
+
     :root {
-      --primary-color: #0d6efd;
-      --secondary-color: #6c757d;
-      --success-color: #32CD32;
-      --bs-success: #32CD32;
-      --bs-success-rgb: 50, 205, 50;
-      --danger-color: #dc3545;
+      --bg-primary: #090c14; --bg-secondary: #0f131d;
+      --bg-card: rgba(15, 19, 29, 0.72); --bg-card-hover: rgba(15, 19, 29, 0.92);
+      --border-subtle: rgba(255, 255, 255, 0.06); --border-hover: rgba(255, 255, 255, 0.12); --border-active: rgba(99, 102, 241, 0.45);
+      --text-primary: #f8fafc; --text-secondary: #94a3b8; --text-muted: #64748b;
+      --accent: #6366f1; --accent-light: #818cf8; --accent-glow: rgba(99, 102, 241, 0.2);
+      --success: #22c55e; --success-bg: rgba(34, 197, 94, 0.1);
+      --warning: #f59e0b; --warning-bg: rgba(245, 158, 11, 0.1);
+      --danger: #ef4444; --danger-bg: rgba(239, 68, 68, 0.1);
+      --radius: 16px; --radius-sm: 10px;
+      --shadow: 0 8px 32px rgba(0, 0, 0, 0.35); --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+      --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      --font: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px; --space-12: 48px;
+      --text-xs: 11px; --text-sm: 12px; --text-base: 13px; --text-md: 14px; --text-lg: 16px; --text-xl: 20px; --text-2xl: 24px; --text-3xl: 30px;
     }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      padding: 0;
-      background-color: #0d1117;
-    }
-    .dashboard-container {
-      position: relative;
-      z-index: 10;
-      max-width: 1200px;
-      margin: 0 auto;
-      overflow-x: hidden;
-    }
-    .card {
-      position: relative;
-      border: none;
-      border-radius: var(--glass-radius, 12px);
-      margin-bottom: 20px;
-      background: transparent !important;
-    }
-    .glass-panel {
-      position: absolute;
-      inset: 0;
-      z-index: 0;
-      border-radius: inherit;
-      overflow: hidden;
-    }
-    .glass-panel::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-      border-radius: inherit;
-      background-color: rgba(255, 255, 255, 0.08);
-      pointer-events: none;
-    }
-    .glass-panel::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      z-index: 0;
-      border-radius: inherit;
-      pointer-events: none;
-    }
-    .card-content {
-      position: relative;
-      z-index: 3;
-      border-radius: inherit;
-      overflow: hidden;
-      background: rgba(0, 0, 0, 0.1);
-    }
-    .card-header {
-      background: rgba(0, 0, 0, 0.2) !important;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      font-size: 14px;
-      color: white;
-      padding: 0.4rem 1.25rem;
-      position: relative;
-      z-index: 4;
-    }
-    .card-body {
-      padding: 0.5rem;
-      position: relative;
-      z-index: 4;
-      backdrop-filter: blur(13px) !important;
-      -webkit-backdrop-filter: blur(13px) !important;
-    }
-    .status-indicator {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      display: inline-block;
-      margin-right: 8px;
-    }
-    .status-online { background-color: var(--success-color); box-shadow: 0 0 10px var(--success-color); }
-    .status-offline { background-color: var(--danger-color); box-shadow: 0 0 10px var(--danger-color); }
-    .status-unknown { background-color: var(--secondary-color); }
-    .token-blurred {
-      filter: blur(5px);
-      transition: filter 0.2s ease;
-    }
-    .token-blurred:hover {
-      filter: blur(0) !important;
-    }
-    .btn-white-bg {
-      background: white;
-      border: 1px solid white;
-      color: #0d1117;
-    }
-    .btn-white-bg:hover {
-      background: rgba(255, 255, 255, 0.85);
-      border-color: white;
-      color: #0d1117;
-    }
-    .btn-outline-action {
-      border: 1px solid rgba(255, 255, 255, 0.8);
-      color: white;
-      background: transparent;
-    }
-    .btn-outline-action:hover {
-      background: rgba(255, 255, 255, 0.15);
-      border-color: white;
-      color: white;
-    }
-    .stats-card {
-      background: transparent;
-      border-radius: 12px;
-      padding: 0;
-      text-align: center;
-      position: relative;
-      z-index: 10;
-      backdrop-filter: blur(13px);
-      -webkit-backdrop-filter: blur(13px);
-    }
-    .stats-value {
-      font-size: 28px;
-      font-weight: 700;
-      color: white;
-    }
-    .stats-label {
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.8);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-    .toast-container {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 1050;
-    }
-    .form-label {
-      font-weight: 600;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: rgba(255, 255, 255, 0.9);
-      margin-bottom: 6px;
-    }
-    .form-control, .form-select {
-      display: block;
-      width: 100%;
-      background: rgba(255, 255, 255, 0.15);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: white;
-      padding: 0.375rem 0.75rem;
-      font-size: 1rem;
-      border-radius: 0.375rem;
-    }
-    .form-control:focus, .form-select:focus {
-      background: rgba(255, 255, 255, 0.2);
-      border-color: rgba(255, 255, 255, 0.4);
-      color: white;
-      outline: 0;
-      box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
-    }
-    .form-control::placeholder {
-      color: rgba(255, 255, 255, 0.6);
-    }
-    .text-muted {
-      color: rgba(255, 255, 255, 0.7) !important;
-    }
-    h4, h5, strong, .fw-medium {
-      color: white !important;
-    }
-    small {
-      color: rgba(255, 255, 255, 0.8) !important;
-    }
-    .collapsible-header {
-      cursor: pointer;
-      user-select: none;
-    }
-    .collapsible-header .toggle-icon {
-      transition: transform 0.2s ease;
-    }
-    .collapsible-header .toggle-icon.collapsed {
-      transform: rotate(-90deg);
-    }
-    .collapse-section {
-      transition: all 0.3s ease;
-    }
-    .collapse-section.collapsed {
-      display: none;
-    }
-    .pool-card {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 10px;
-    }
-    .pool-card.locked {
-      border: 1px dashed rgba(0, 0, 0, 0.8);
-      background: rgba(0, 0, 0, 0.1);
-    }
-    .locked-model-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      margin-top: 8px;
-      padding: 4px 10px;
-      border: 1px dashed rgba(0, 0, 0, 0.8);
-      border-radius: 6px;
-      background: rgba(0, 0, 0, 0.15);
-      font-size: 0.78rem;
-      color: #000000;
-      font-weight: 600;
-    }
-    .locked-model-badge .lock-icon {
-      font-size: 0.85rem;
-    }
-    .unlock-btn {
-      margin-left: 8px;
-      padding: 2px 10px;
-      border: 1px solid rgba(0, 0, 0, 0.8);
-      border-radius: 5px;
-      background: rgba(0, 0, 0, 0.2);
-      color: #000000;
-      font-size: 0.72rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-    .unlock-btn:hover {
-      background: rgba(0, 0, 0, 0.35);
-    }
-    .pool-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 8px;
-    }
-    .pool-name {
-      font-weight: 600;
-      color: #58a6ff;
-      font-size: 0.95rem;
-    }
-    .pool-status {
-      padding: 3px 10px;
-      border-radius: 10px;
-      font-size: 0.75rem;
-      font-weight: 600;
-    }
-    .model-tag {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      background: rgba(255, 255, 255, 0.03);
-      opacity: 0.5;
-      user-select: none;
-      transition: all 0.2s ease;
-      margin: 3px;
-    }
-    .model-tag.enabled {
-      border-color: rgba(50, 205, 50, 0.3);
-      background: rgba(50, 205, 50, 0.1);
-      opacity: 1;
-    }
-    .model-tag:hover { opacity: 0.8; }
+    ::selection { background: var(--accent); color: #fff; }
+
+    .glass-panel { position: absolute; inset: 0; z-index: 0; border-radius: inherit; background: var(--bg-card); backdrop-filter: blur(20px) saturate(150%) contrast(1.02); -webkit-backdrop-filter: blur(20px) saturate(150%) contrast(1.02); border: 1px solid var(--border-subtle); box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(255,255,255,0.02), 0 1px 2px rgba(0,0,0,0.1); transition: border-color var(--transition), background var(--transition), box-shadow var(--transition); }
+    .glass-panel::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, transparent 40%, transparent 60%, rgba(255,255,255,0.02) 100%); pointer-events: none; }
+    [data-glass]:hover .glass-panel { border-color: var(--border-hover); background: var(--bg-card-hover); box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -1px 0 rgba(255,255,255,0.03), 0 4px 16px rgba(0,0,0,0.2); }
+
+    .card-content { position: relative; z-index: 3; border-radius: inherit; }
+    .card-header { background: rgba(0,0,0,0.18); border-bottom: 1px solid var(--border-subtle); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 11px; color: var(--text-secondary); padding: var(--space-3) var(--space-4); position: relative; z-index: 4; }
+    .card-body { padding: var(--space-4); position: relative; z-index: 4; }
+
+    .flex { display: flex; } .flex-between { display: flex; justify-content: space-between; align-items: center; } .flex-center { display: flex; align-items: center; } .flex-wrap { flex-wrap: wrap; }
+    .gap-1 { gap: var(--space-1); } .gap-2 { gap: var(--space-2); } .gap-3 { gap: var(--space-3); }
+    .w-full { width: 100%; } .text-center { text-align: center; } .text-muted { color: var(--text-muted); } .text-secondary { color: var(--text-secondary); } .text-sm { font-size: var(--text-sm); } .text-xs { font-size: var(--text-xs); }
+    .fw-medium { font-weight: 500; } .fw-semibold { font-weight: 600; } .hidden { display: none; }
+    .me-1 { margin-inline-end: var(--space-1); } .me-2 { margin-inline-end: var(--space-2); } .mt-2 { margin-top: var(--space-2); } .mb-2 { margin-bottom: var(--space-2); } .mb-3 { margin-bottom: var(--space-3); } .p-4 { padding: var(--space-4); }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: var(--space-4) var(--space-4) var(--space-8); }
+
+    .header-bar { padding: 14px var(--space-5); backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%); background: rgba(9,12,20,0.85); border-bottom: 1px solid var(--border-subtle); position: sticky; top: 0; z-index: 100; }
+    .header-title { font-size: var(--text-lg); font-weight: 700; color: var(--text-primary); letter-spacing: -0.25px; display: inline-flex; align-items: center; gap: var(--space-2); }
+    .header-title .brand-icon { color: var(--accent-light); font-size: var(--text-xl); }
+    .header-version { font-size: var(--text-xs); color: var(--text-muted); margin-inline-start: var(--space-2); font-weight: 500; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-subtle); }
+    .header-status { display: inline-flex; align-items: center; gap: var(--space-2); padding: 6px 14px; border-radius: 999px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); font-size: var(--text-sm); font-weight: 500; }
+    .header-uptime { color: var(--text-muted); font-size: var(--text-xs); margin-inline-start: var(--space-2); }
+
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+    .status-dot.online { background: var(--success); box-shadow: 0 0 10px var(--success); }
+    .status-dot.degraded { background: var(--warning); box-shadow: 0 0 10px var(--warning); }
+    .status-dot.offline { background: var(--danger); box-shadow: 0 0 10px var(--danger); }
+    .status-dot.critical { background: var(--danger); box-shadow: 0 0 10px var(--danger); }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .status-dot.online { animation: pulse 2.2s ease-in-out infinite; }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-3); margin-bottom: var(--space-3); }
+    .stat-card { position: relative; border-radius: var(--radius); background: transparent; cursor: default; transition: transform var(--transition), box-shadow var(--transition); }
+    .stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+    .stat-card .glass-panel { background: linear-gradient(145deg, rgba(255,255,255,0.03), rgba(255,255,255,0)), var(--bg-card); }
+    .stat-card .card-content { padding: var(--space-4) var(--space-3); text-align: center; }
+    .stat-icon { width: 28px; height: 28px; border-radius: var(--radius-sm); display: inline-flex; align-items: center; justify-content: center; font-size: 14px; margin-bottom: var(--space-2); background: rgba(255,255,255,0.04); border: 1px solid var(--border-subtle); color: var(--text-muted); transition: color var(--transition), background var(--transition), border-color var(--transition); }
+    .stat-card:hover .stat-icon { border-color: var(--border-hover); color: var(--text-secondary); }
+    .stat-value { font-size: var(--text-2xl); font-weight: 800; color: var(--text-primary); letter-spacing: -0.6px; line-height: 1.1; }
+    .stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; margin-top: var(--space-1); }
+    .stat-card.accent-sessions .stat-icon, .stat-card.accent-sessions .stat-value { color: var(--accent-light); }
+    .stat-card.accent-remaining .stat-icon, .stat-card.accent-remaining .stat-value { color: var(--success); }
+    .stat-card.accent-burn .stat-icon, .stat-card.accent-burn .stat-value { color: var(--warning); }
+    .stat-card.accent-reset .stat-icon, .stat-card.accent-reset .stat-value { color: var(--accent-light); }
+    .stat-card.accent-depletion .stat-value { color: var(--text-primary); }
+    .stat-card.accent-country .stat-value { color: var(--text-secondary); font-size: var(--text-xl); }
+
+    .ad-banner { position: relative; border-radius: var(--radius); margin-bottom: var(--space-3); }
+    .ad-banner .glass-panel { background: rgba(15,19,29,0.45); }
+    .ad-banner .card-content { min-height: 52px; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+    .ad-label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; flex-shrink: 0; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); }
+    .ad-arrow { background: transparent; border: 1px solid transparent; color: var(--text-muted); cursor: pointer; padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); transition: background var(--transition), color var(--transition), border-color var(--transition); display: inline-flex; align-items: center; justify-content: center; }
+    .ad-arrow:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); border-color: var(--border-subtle); }
+    #adSlidesContainer { display: grid; flex: 1; min-width: 0; }
+    #adSlidesContainer > * { grid-row: 1; grid-column: 1; }
+    .ad-slide { opacity: 0; pointer-events: none; visibility: hidden; transition: opacity 0.35s ease; }
+    .ad-slide.active { opacity: 1; pointer-events: auto; visibility: visible; }
+    .ad-dot { cursor: pointer; padding: 4px; }
+    .ad-dot .dot-indicator { width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,0.12); transition: background var(--transition), transform var(--transition); }
+    .ad-dot.active .dot-indicator { background: var(--accent); transform: scale(1.4); }
+    .ad-content { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: var(--text-sm); }
+    .ad-img { width: 28px; height: 28px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+    .ad-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .ad-sponsor { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
+    .ad-title { font-weight: 600; color: var(--text-primary); }
+    .ad-desc { font-size: 10px; color: var(--text-muted); }
+    .ad-cta { background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: var(--accent-light); padding: 3px 10px; border-radius: 6px; font-size: 10px; font-weight: 600; white-space: nowrap; flex-shrink: 0; text-decoration: none; }
+
+    .token-card { position: relative; border-radius: var(--radius); margin-bottom: var(--space-3); background: transparent; transition: transform var(--transition), box-shadow var(--transition); }
+    .token-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+    .token-card .glass-panel { background: linear-gradient(145deg, rgba(255,255,255,0.025), rgba(255,255,255,0)), var(--bg-card); }
+    .token-card.locked .glass-panel { border-color: var(--border-active); }
+    .token-card .card-content { padding: var(--space-4); }
+    .token-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-3); }
+    .token-name { font-weight: 600; font-size: var(--text-md); color: var(--text-primary); }
+    .token-health { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: var(--text-xs); font-weight: 600; white-space: nowrap; }
+    .token-health.active { background: var(--success-bg); color: var(--success); }
+    .token-health.banned, .token-health.unauthorized { background: var(--danger-bg); color: var(--danger); }
+    .token-health.network_error { background: var(--warning-bg); color: var(--warning); }
+    .token-health.unknown { background: rgba(100,116,139,0.12); color: var(--text-muted); }
+    .token-health .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+    .token-health.active .dot { background: var(--success); }
+    .token-health.banned .dot, .token-health.unauthorized .dot { background: var(--danger); }
+    .token-health.network_error .dot { background: var(--warning); }
+    .token-health.unknown .dot { background: var(--text-muted); }
+    .token-session { font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--space-3); display: inline-flex; align-items: center; gap: var(--space-2); }
+    .token-session .session-pip { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+    .token-session .session-pip.active { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    .token-session .session-pip.inactive { background: var(--text-muted); }
+    .token-usage-header { display: flex; justify-content: space-between; font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--space-2); }
+    .token-usage-bar { height: 5px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; margin-bottom: var(--space-1); }
+    .token-usage-fill { height: 100%; border-radius: 3px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+    .token-usage-fill.low { background: linear-gradient(90deg, var(--success), #4ade80); }
+    .token-usage-fill.medium { background: linear-gradient(90deg, var(--warning), #fbbf24); }
+    .token-usage-fill.high { background: linear-gradient(90deg, var(--danger), #f87171); }
+    .token-burn { font-size: var(--text-xs); color: var(--text-muted); text-align: right; font-weight: 500; }
+    .token-meta { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); font-size: var(--text-xs); color: var(--text-muted); display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: center; }
+    .token-meta span { display: inline-flex; align-items: center; gap: var(--space-1); }
+    .locked-badge { display: inline-flex; align-items: center; gap: var(--space-1); margin-top: var(--space-3); padding: var(--space-1) var(--space-2); border: 1px dashed rgba(99,102,241,0.35); border-radius: var(--radius-sm); background: rgba(99,102,241,0.06); font-size: var(--text-xs); color: var(--accent-light); font-weight: 500; }
+    .locked-badge .unlock-btn { margin-inline-start: var(--space-2); padding: 2px 10px; border: 1px solid rgba(99,102,241,0.25); border-radius: 6px; background: rgba(99,102,241,0.1); color: var(--accent-light); font-size: 10px; font-weight: 600; cursor: pointer; transition: background var(--transition); font-family: var(--font); }
+    .locked-badge .unlock-btn:hover { background: rgba(99,102,241,0.2); }
+    .token-error { margin-top: var(--space-3); font-size: var(--text-xs); color: var(--danger); word-break: break-all; line-height: 1.5; }
+    .token-remaining-time { font-size: var(--text-sm); font-weight: 600; color: var(--accent-light); }
+    .token-hint { display: block; margin-top: var(--space-4); color: var(--text-secondary); font-size: var(--text-xs); }
+
+    .alert-banner { border-radius: var(--radius-sm); padding: var(--space-3) var(--space-4); font-size: var(--text-sm); display: flex; align-items: center; gap: var(--space-2); line-height: 1.5; }
+    .alert-banner.danger { background: var(--danger-bg); border: 1px solid rgba(239,68,68,0.25); color: var(--danger); }
+    .alert-banner.warning { background: var(--warning-bg); border: 1px solid rgba(245,158,11,0.25); color: var(--warning); }
+
+    .model-tag { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--border-subtle); background: rgba(255,255,255,0.02); opacity: 0.55; user-select: none; transition: all var(--transition); margin: 3px; }
+    .model-tag.enabled { border-color: rgba(99,102,241,0.3); background: rgba(99,102,241,0.08); opacity: 1; }
+    .model-tag:hover { opacity: 0.85; border-color: var(--border-hover); }
     .model-tag.enabled:hover { opacity: 1; }
-    .model-tag-name {
-      font-size: 11px;
-      font-weight: 600;
-      color: white;
-      white-space: nowrap;
+    .model-tag-name { font-size: var(--text-xs); font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+    .model-tag-id { font-size: 9px; color: var(--text-muted); white-space: nowrap; }
+    .model-tag input[type="checkbox"] { pointer-events: none; }
+
+    .btn-ghost { border: 1px solid var(--border-subtle); color: var(--text-secondary); background: transparent; border-radius: var(--radius-sm); padding: 10px var(--space-4); font-size: var(--text-sm); font-weight: 500; transition: all var(--transition); font-family: var(--font); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); }
+    .btn-ghost:hover { background: rgba(255,255,255,0.05); border-color: var(--border-hover); color: var(--text-primary); }
+    .btn-ghost:active { transform: translateY(1px); }
+    .btn-primary-ghost { border: 1px solid var(--accent); color: var(--accent-light); background: rgba(99,102,241,0.08); border-radius: var(--radius-sm); padding: 10px var(--space-4); font-size: var(--text-sm); font-weight: 500; transition: all var(--transition); font-family: var(--font); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); text-decoration: none; }
+    .btn-primary-ghost:hover { background: rgba(99,102,241,0.15); border-color: var(--accent-light); color: #fff; }
+    .btn-primary-ghost:active { transform: translateY(1px); }
+    .btn-xs { padding: 4px 12px; font-size: var(--text-xs); }
+
+    .collapsible-header { cursor: pointer; user-select: none; }
+    .collapsible-header .toggle-icon { transition: transform var(--transition); }
+    .collapsible-header .toggle-icon.collapsed { transform: rotate(-90deg); }
+    .collapse-section { overflow: hidden; max-height: 2000px; transition: max-height 0.35s ease, opacity 0.25s ease; opacity: 1; }
+    .collapse-section.collapsed { max-height: 0; opacity: 0; }
+
+    .form-control, .form-select { background: rgba(255,255,255,0.04); border: 1px solid var(--border-subtle); color: var(--text-primary); border-radius: var(--radius-sm); font-size: var(--text-sm); font-family: var(--font); padding: var(--space-2) var(--space-3); width: 100%; }
+    .form-control:focus, .form-select:focus { background: rgba(255,255,255,0.06); border-color: var(--border-active); color: var(--text-primary); box-shadow: 0 0 0 3px var(--accent-glow); outline: none; }
+    .form-control::placeholder { color: var(--text-muted); }
+    .form-label { font-weight: 500; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: var(--space-1); display: block; }
+    .form-check-input { background: rgba(255,255,255,0.08); border: 1px solid var(--border-subtle); cursor: pointer; }
+    .form-check-input:checked { background-color: var(--accent); border-color: var(--accent); }
+    .form-check-label { font-size: var(--text-sm); color: var(--text-secondary); cursor: pointer; }
+
+    .switch { position: relative; display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+    .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .switch-track { width: 36px; height: 20px; border-radius: 10px; background: rgba(255,255,255,0.1); border: 1px solid var(--border-subtle); transition: background var(--transition), border-color var(--transition); flex-shrink: 0; position: relative; }
+    .switch-track::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-muted); transition: transform var(--transition), background var(--transition); }
+    .switch input:checked + .switch-track { background: rgba(99,102,241,0.2); border-color: var(--accent); }
+    .switch input:checked + .switch-track::after { transform: translateX(16px); background: var(--accent-light); }
+    .switch-label { font-size: var(--text-sm); color: var(--text-secondary); cursor: pointer; }
+
+    .input-group { display: flex; gap: var(--space-2); align-items: center; }
+    .input-group .form-control { flex: 1; min-width: 0; }
+    .progress { height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
+    .progress-bar { height: 100%; background: var(--accent); border-radius: 2px; }
+    .badge-accent { background: var(--accent); color: #fff; font-size: var(--text-xs); padding: 2px 8px; border-radius: 999px; font-weight: 600; display: inline-flex; align-items: center; }
+    .badge-success { background: var(--success); color: #fff; font-size: var(--text-xs); padding: 2px 8px; border-radius: 999px; font-weight: 600; display: inline-flex; align-items: center; gap: var(--space-1); }
+    .spinner { width: 24px; height: 24px; border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
+    .spinner-accent { border-top-color: var(--accent-light); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .no-tokens { text-align: center; padding: var(--space-8) 0; }
+    .no-tokens-icon { font-size: 2rem; color: var(--text-muted); margin-bottom: var(--space-3); }
+    .no-tokens-text { color: var(--text-secondary); margin-bottom: var(--space-4); font-size: var(--text-sm); }
+    .config-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-2); }
+    .config-wide { grid-column: span 2; }
+    .config-value { font-size: var(--text-sm); font-weight: 500; margin-top: 2px; }
+    .main-grid { display: grid; gap: var(--space-3); }
+    .sidebar-stack { display: flex; flex-direction: column; gap: var(--space-3); }
+    .oauth-success-text { font-size: var(--text-sm); color: var(--text-primary); font-weight: 500; }
+
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .form-control:focus-visible { outline: none; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.07); border-radius: 3px; } ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.12); }
+
+    @media (min-width: 768px) { .stats-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (min-width: 1024px) { .stats-grid { grid-template-columns: repeat(6, 1fr); } .main-grid { grid-template-columns: 2fr 1fr; } }
+    @media (max-width: 767px) {
+      .header-bar { padding: var(--space-3) var(--space-4); }
+      .header-version, .header-uptime { display: none; }
+      .stat-card .card-content { padding: var(--space-3) var(--space-2); }
+      .stat-value { font-size: var(--text-xl); }
+      .stat-icon { width: 24px; height: 24px; font-size: 12px; }
+      .card-body { padding: var(--space-3); }
+      .token-header { flex-direction: column; gap: var(--space-2); }
+      .token-health { align-self: flex-start; }
+      .token-meta { gap: var(--space-3); }
+      .config-grid { grid-template-columns: 1fr; }
+      .config-wide { grid-column: span 1; }
     }
-    .model-tag-id {
-      font-size: 9px;
-      color: rgba(255, 255, 255, 0.5);
-      white-space: nowrap;
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+      .status-dot.online { animation: none; }
+      .token-usage-fill { transition: none; }
     }
-    .model-tag input[type="checkbox"] {
-      pointer-events: none;
+    @media (prefers-reduced-transparency: reduce) {
+      .glass-panel { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(15,19,29,0.95); }
+      .header-bar { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(9,12,20,0.98); }
     }
-    .ad-card {
-      padding: 0 .5rem;
+
+    .mismatch-banner {
       position: relative;
-      cursor: default;
-      flex-grow: 1;
-      display: flex;
-      flex-direction: column;
-    }
-    .ad-glass-box {
-      display: flex;
-      align-items: stretch;
-      gap: 0;
-      flex: 1;
-      min-height: 0;
-      width: 100%;
-    }
-    .ad-glass-inner {
-      flex: 1;
-      min-width: 0;
-      min-height: 0;
-      position: relative;
-      overflow: hidden;
-      border-radius: 12px;
-      background: rgba(255,255,255,0.5);
-      border: 1px solid rgba(255,255,255,0.15);
-      padding: 10px 12px;
-      backdrop-filter: blur(13px);
-      -webkit-backdrop-filter: blur(13px);
-    }
-    .ad-arrow {
-      flex-shrink: 0;
-      width: 32px;
-      border-radius: 12px;
-      background: rgba(255,255,255,0.15);
-      border: none;
-      color: rgba(0,0,0,0.35);
-      font-size: 16px;
-      cursor: pointer;
+      border-radius: var(--radius-sm);
+      padding: var(--space-3) var(--space-4);
+      font-size: var(--text-sm);
       display: flex;
       align-items: center;
-      justify-content: center;
-      transition: color 0.15s ease, background 0.15s ease;
-      padding: 0;
-      line-height: 1;
-      backdrop-filter: blur(13px);
-      -webkit-backdrop-filter: blur(13px);
+      gap: var(--space-2);
+      line-height: 1.5;
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+      color: var(--warning);
+      margin-bottom: var(--space-3);
+      animation: slideIn 0.3s ease;
     }
-    .ad-arrow:hover {
-      color: rgba(0,0,0,0.7);
-    }
-    .ad-arrow-left { margin-right: 4px; }
-    .ad-arrow-right { margin-left: 4px; }
-    #adSlidesContainer {
-      display: grid;
-    }
-    #adSlidesContainer > * {
-      grid-row: 1;
-      grid-column: 1;
-    }
-    .ad-slide {
-      opacity: 0;
-      pointer-events: none;
-      visibility: hidden;
-    }
-    .ad-slide.active {
-      opacity: 1;
-      pointer-events: auto;
-      visibility: visible;
-    }
-    .ad-dot {
+    .mismatch-banner .mismatch-icon { font-size: 14px; flex-shrink: 0; }
+    .mismatch-banner .mismatch-text { flex: 1; }
+    .mismatch-banner .mismatch-detail { font-size: var(--text-xs); opacity: 0.8; margin-top: 2px; }
+    .mismatch-banner .mismatch-dismiss {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
       cursor: pointer;
-      padding: 4px;
+      padding: 2px;
+      font-size: 16px;
+      line-height: 1;
+      transition: color var(--transition);
     }
-    .ad-dot .dot-indicator {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: rgba(0,0,0,0.2);
-      transition: background 0.2s ease, transform 0.2s ease;
-    }
-    .ad-dot.active .dot-indicator {
-      background: rgba(0,0,0,0.7);
-      transform: scale(1.3);
-    }
-    .ad-header-bar {
-      position: absolute;
-      top: 2px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-      pointer-events: none;
-    }
-    .ad-header-bar .ad-label {
-      font-size: 9px;
-      color: rgba(255,255,255,0.7);
-      text-transform: uppercase;
-      letter-spacing: 1px;
+    .mismatch-banner .mismatch-dismiss:hover { color: var(--text-primary); }
+
+    .mismatch-count-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: var(--text-xs);
+      font-weight: 600;
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--warning);
+      border: 1px solid rgba(245, 158, 11, 0.3);
     }
   </style>
 </head>
 <body>
-  <svg style="position:absolute;overflow:hidden;width:0;height:0" color-interpolation-filters="sRGB">
-    <defs id="glass-defs"></defs>
-  </svg>
+  <div class="header-bar flex-between">
+    <div class="flex-center gap-2">
+      <span class="header-title"><i class="bi bi-lightning-charge-fill brand-icon"></i>Freebuff Proxy</span>
+      <span class="header-version" id="runtimeInfo">-</span>
+    </div>
+    <div class="header-status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Checking...</span>
+      <span class="header-uptime" id="headerUptime"></span>
+    </div>
+  </div>
 
-  <div class="container pt-2">
-  <div class="row justify-content-center">
-  <div class="dashboard-container col-11">
-    <div class="card sticky-top p-0" style="top:0;z-index:100" data-glass>
+  <div class="container">
+    <div class="stats-grid">
+      <div class="stat-card accent-sessions" data-glass><div class="glass-panel"></div><div class="card-content"><div class="stat-icon"><i class="bi bi-arrow-up-circle"></i></div><div class="stat-value" id="usageDisplay">-/-</div><div class="stat-label">Sessions Used</div></div></div>
+      <div class="stat-card accent-remaining" data-glass><div class="glass-panel"></div><div class="card-content"><div class="stat-icon"><i class="bi bi-inbox"></i></div><div class="stat-value" id="usageRemaining">-</div><div class="stat-label">Remaining</div></div></div>
+      <div class="stat-card accent-burn" data-glass><div class="glass-panel"></div><div class="card-content"><div class="stat-icon"><i class="bi bi-graph-up-arrow"></i></div><div class="stat-value" id="usageBurnRate">-</div><div class="stat-label">Burn /hr</div></div></div>
+      <div class="stat-card accent-reset" data-glass><div class="glass-panel"></div><div class="card-content"><div class="stat-icon"><i class="bi bi-clock"></i></div><div class="stat-value" id="usageReset">-</div><div class="stat-label">Resets In</div></div></div>
+      <div class="stat-card accent-depletion" data-glass><div class="glass-panel"></div><div class="card-content"><div class="stat-icon"><i class="bi bi-hourglass-bottom"></i></div><div class="stat-value" id="usageDepletion">-</div><div class="stat-label">Depletion</div></div></div>
+      <div class="stat-card accent-country" data-glass><div class="glass-panel"></div><div class="card-content"><div class="stat-icon"><i class="bi bi-globe"></i></div><div class="stat-value" id="countryCode">-</div><div class="stat-label">Country</div></div></div>
+    </div>
+
+    <div id="mismatchBanner" class="mismatch-banner hidden">
+      <i class="bi bi-exclamation-triangle-fill mismatch-icon"></i>
+      <div class="mismatch-text">
+        <div>Model mismatch detected</div>
+        <div class="mismatch-detail" id="mismatchDetail"></div>
+      </div>
+      <button class="mismatch-dismiss" onclick="dismissMismatch()">&times;</button>
+    </div>
+
+    <div class="ad-banner" data-glass id="adBanner">
       <div class="glass-panel"></div>
-      <div class="card-content px-2">
-        <div class="d-flex justify-content-between align-items-center">
-          <div>
-            <h4 class="mb-0"><i class="bi bi-lightning-charge-fill me-2"></i>Freebuff2OpenCode Dashboard</h4>
-          </div>
-          <div class="text-end">
-            <div>
-              <span id="statusIndicator" class="status-indicator status-unknown"></span>
-              <span id="statusText" class="fw-medium">Checking...</span>
-            </div>
-          </div>
-        </div>
+      <div class="card-content">
+        <span class="ad-label"><i class="bi bi-megaphone me-1"></i>Ad</span>
+        <button class="ad-arrow" onclick="prevAd()" title="Previous"><i class="bi bi-chevron-left"></i></button>
+        <div id="adSlidesContainer"></div>
+        <button class="ad-arrow" onclick="nextAd()" title="Next"><i class="bi bi-chevron-right"></i></button>
+        <div id="adDots"></div>
+        <span class="ad-label" id="adCounterLabel"></span>
       </div>
     </div>
 
-    <div class="row text-center d-flex align-items-stretch mb-3">
-      <div class="col-12 col-md-8">
-        <div class="card h-100 d-flex flex-column" data-glass>
-          <div class="glass-panel"></div>
-          <div class="ad-card card-content flex-grow-1 d-flex flex-column">
-            <div class="ad-header-bar">
-              <span class="ad-label" id="adCounterLabel">Ad</span>
-            </div>
-            <div class="ad-glass-box">
-              <button class="ad-arrow ad-arrow-left" onclick="prevAd()" title="Previous ad"><i class="bi bi-chevron-left"></i></button>
-              <div class="ad-glass-inner">
-                <div id="adSlidesContainer"></div>
-              </div>
-              <button class="ad-arrow ad-arrow-right" onclick="nextAd()" title="Next ad"><i class="bi bi-chevron-right"></i></button>
-            </div>
-            <div id="adDots" style="display:flex;justify-content:center;gap:4px;margin-top:6px"></div>
-          </div>
-        </div>
-      </div>
-      <div class="col-6 col-md-2"><div class="stats-card card h-100 d-flex flex-column" data-glass><div class="card-content flex-grow-1 justify-content-center align-items-center d-flex flex-column" style="padding:10px"><div class="stats-value" id="totalModels">0</div><div class="stats-label">Models</div></div></div></div>
-      <div class="col-6 col-md-2"><div class="stats-card card h-100 d-flex flex-column" data-glass><div class="card-content flex-grow-1 justify-content-center align-items-center d-flex flex-column" style="padding:10px"><div class="stats-value" id="countryCode">-</div><div class="stats-label">Country</div></div></div></div>
-    </div>
-
-    <div class="row">
-      <div class="col-lg-8">
+    <div class="main-grid">
+      <div>
         <div class="card" data-glass data-section="tokens">
           <div class="glass-panel"></div>
           <div class="card-content">
-            <div class="card-header collapsible-header d-flex justify-content-between align-items-center" onclick="toggleSection('tokens')">
-              <span>
-                <i class="bi bi-chevron-down toggle-icon me-1"></i>
-                <i class="bi bi-key-fill me-2"></i>Auth Token Status
+            <div class="card-header collapsible-header flex-between" onclick="toggleSection('tokens')">
+              <span><i class="bi bi-chevron-down toggle-icon me-1"></i><i class="bi bi-key-fill me-2"></i>Auth Token Status</span>
+              <span class="flex-center gap-2">
+                <span id="tokenRemainingTime" class="token-remaining-time"></span>
+                <span class="badge-accent" id="tokenCountBadge">0</span>
               </span>
-              <span id="tokenRemainingTime" style="font-size:0.85rem;font-weight:600;color:#58a6ff"></span>
-              <span class="badge bg-secondary" id="tokenCountBadge">0</span>
             </div>
             <div class="card-body collapse-section" id="section-tokens">
+              <div id="tokenAlertBanner" class="mb-3"></div>
               <div id="tokenPoolsContainer"></div>
-              <small class="text-muted" style="display:block;margin-top:10px;">
-                Tokens are auto-detected from Freebuff CLI (~/.config/manicode/credentials.json)
-              </small>
+              <span class="token-hint">Tokens auto-detected from Freebuff CLI (~/.config/manicode/credentials.json)</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="col-lg-4">
-        <div id="oauthContainer" style="display:none"></div>
+      <div class="sidebar-stack">
+        <div id="oauthContainer" class="hidden"></div>
         <div class="card" data-glass data-section="models">
           <div class="glass-panel"></div>
           <div class="card-content">
-            <div class="card-header collapsible-header d-flex justify-content-between align-items-center" onclick="toggleSection('models')">
-              <span>
-                <i class="bi bi-chevron-down toggle-icon me-1"></i>
-                <i class="bi bi-cpu-fill me-2"></i>Available Models
-              </span>
-              <span class="badge bg-secondary" id="modelCountBadge">0</span>
+            <div class="card-header collapsible-header flex-between" onclick="toggleSection('models')">
+              <span><i class="bi bi-chevron-down toggle-icon me-1"></i><i class="bi bi-cpu-fill me-2"></i>Available Models</span>
+              <span class="badge-accent" id="modelCountBadge">0</span>
             </div>
             <div class="card-body collapse-section" id="section-models">
               <div id="modelsContainer"></div>
@@ -493,10 +360,10 @@
               <i class="bi bi-lightning-charge-fill me-2"></i>Quick Actions
             </div>
             <div class="card-body collapse-section collapsed" id="section-actions">
-              <div class="d-grid gap-2">
-                <button class="btn btn-outline-action" onclick="checkHealth()"><i class="bi bi-activity me-2"></i>Check Health</button>
-                <button class="btn btn-outline-action" onclick="testConnection()"><i class="bi bi-wifi me-2"></i>Test Connection</button>
-                <button class="btn btn-outline-action" onclick="refreshModels()"><i class="bi bi-arrow-clockwise me-2"></i>Refresh Models</button>
+              <div style="display:grid;gap:var(--space-2);">
+                <button class="btn-ghost w-full" onclick="checkHealth()"><i class="bi bi-activity"></i>Check Health</button>
+                <button class="btn-ghost w-full" onclick="testConnection()"><i class="bi bi-wifi"></i>Test Connection</button>
+                <button class="btn-ghost w-full" onclick="refreshModels()"><i class="bi bi-arrow-clockwise"></i>Refresh Models</button>
               </div>
             </div>
           </div>
@@ -510,33 +377,10 @@
               <i class="bi bi-info-circle-fill me-2"></i>Environment
             </div>
             <div class="card-body collapse-section collapsed" id="section-env">
-              <div class="mb-2">
-                <small class="text-muted">Runtime</small>
-                <div class="fw-medium" id="runtimeInfo">-</div>
-              </div>
-              <div class="mb-2">
-                <small class="text-muted">Started At</small>
-                <div class="fw-medium" id="startedAt">-</div>
-              </div>
-
-              <div class="mb-2">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" id="wallpaperToggle" onchange="toggleWallpaper()">
-                  <label class="form-check-label text-muted" for="wallpaperToggle" style="cursor:pointer">Enable Wallpaper</label>
-                </div>
-              </div>
-              <div class="mb-2">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" id="adsToggleEnv" checked onchange="toggleAds(this.checked)">
-                  <label class="form-check-label text-muted" for="adsToggleEnv" style="cursor:pointer">Show Ads</label>
-                </div>
-              </div>
-              <div class="mb-2">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" id="blurTokensEnv" onchange="toggleBlurTokens(this.checked)">
-                  <label class="form-check-label text-muted" for="blurTokensEnv" style="cursor:pointer">SS Mode</label>
-                </div>
-              </div>
+              <div class="mb-2"><small>Started At</small><div class="config-value" id="startedAt">-</div></div>
+              <div class="mb-2"><label class="switch"><input type="checkbox" id="wallpaperToggle" onchange="toggleWallpaper()"><span class="switch-track"></span><span class="switch-label">Enable Wallpaper</span></label></div>
+              <div class="mb-2"><label class="switch"><input type="checkbox" id="adsToggleEnv" checked onchange="toggleAds(this.checked)"><span class="switch-track"></span><span class="switch-label">Show Ads</span></label></div>
+              <div class="mb-2"><label class="switch"><input type="checkbox" id="blurTokensEnv" onchange="toggleBlurTokens(this.checked)"><span class="switch-track"></span><span class="switch-label">SS Mode</span></label></div>
             </div>
           </div>
         </div>
@@ -550,25 +394,11 @@
             </div>
             <div class="card-body collapse-section collapsed" id="section-config">
               <form id="configForm">
-                <div class="row">
-                  <div class="col-6 mb-2">
-                    <label class="form-label" style="font-size:10px;margin-bottom:2px">Listen Address</label>
-                    <input type="text" class="form-control form-control-sm" id="listenAddr" value=":8080" onchange="saveConfigValue('listenAddr', 'listenAddr')">
-                  </div>
-                  <div class="col-6 mb-2">
-                    <label class="form-label" style="font-size:10px;margin-bottom:2px">Rotation</label>
-                    <input type="text" class="form-control form-control-sm" id="rotationInterval" value="6h" onchange="saveConfigValue('rotationInterval', 'rotationInterval')">
-                  </div>
-                </div>
-                <div class="row">
-                  <div class="col-8 mb-2">
-                    <label class="form-label" style="font-size:10px;margin-bottom:2px">Upstream URL</label>
-                    <input type="url" class="form-control form-control-sm" id="upstreamUrl" value="https://www.codebuff.com" onchange="saveConfigValue('upstreamUrl', 'upstreamBaseURL')">
-                  </div>
-                  <div class="col-4 mb-2">
-                    <label class="form-label" style="font-size:10px;margin-bottom:2px">Timeout</label>
-                    <input type="text" class="form-control form-control-sm" id="requestTimeout" value="15m" onchange="saveConfigValue('requestTimeout', 'requestTimeout')">
-                  </div>
+                <div class="config-grid">
+                  <div class="mb-2"><label class="form-label">Listen Address</label><input type="text" class="form-control" id="listenAddr" value=":8080" onchange="saveConfigValue('listenAddr', 'listenAddr')"></div>
+                  <div class="mb-2"><label class="form-label">Rotation</label><input type="text" class="form-control" id="rotationInterval" value="6h" onchange="saveConfigValue('rotationInterval', 'rotationInterval')"></div>
+                  <div class="mb-2 config-wide"><label class="form-label">Upstream URL</label><input type="url" class="form-control" id="upstreamUrl" value="https://www.codebuff.com" onchange="saveConfigValue('upstreamUrl', 'upstreamBaseURL')"></div>
+                  <div class="mb-2"><label class="form-label">Timeout</label><input type="text" class="form-control" id="requestTimeout" value="15m" onchange="saveConfigValue('requestTimeout', 'requestTimeout')"></div>
                 </div>
               </form>
             </div>
@@ -577,565 +407,46 @@
       </div>
     </div>
   </div>
-  </div>
-  </div>
 
   <div class="toast-container" id="toastContainer"></div>
+<script>
+    let proxyData=null,config={},models=[],modelMetadata={},enabledModels=[],blurTokensEnabled=false,oauthSession=null,oauthPollTimer=null,adsEnabled=true,remainingMsAtFetch=0,remainingMsTimestamp=0,usageData={used:0,limit:0,remaining:0,nextResetAt:null},adsList=[],currentAdIdx=0,adImpressionSent=new Set(),startTime=null,lastMismatchCount=0;
+    function showToast(m,t='info'){const e=document.createElement('div');e.className='toast-custom '+t;e.innerHTML='<span>'+m+'</span><button class="toast-close" onclick="this.parentElement.remove()">&times;</button>';document.getElementById('toastContainer').appendChild(e);setTimeout(()=>{if(e.parentElement)e.remove();},4000);}
+    async function fetchBingWallpaper(){try{const r=await fetch('/api/bg');if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();if(d.url){document.body.style.backgroundImage='url("'+d.url+'")';document.body.style.backgroundRepeat='no-repeat';document.body.style.backgroundPosition='center';document.body.style.backgroundSize='cover';document.body.style.backgroundAttachment='fixed';document.body.style.backgroundColor='#090c14';}}catch(e){document.body.style.backgroundImage='none';document.body.style.backgroundColor='#090c14';}}
+    async function saveConfigValue(elId,ck){const v=document.getElementById(elId).value;const p={};p[ck]=v;try{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});const d=await r.json();if(d.success){showToast(ck+' saved','info');config=d.config;}}catch(e){}}
+    async function toggleWallpaper(){const c=document.getElementById('wallpaperToggle').checked;config.enableWallpaper=c;fetchBingWallpaper();try{await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enableWallpaper:c})});}catch(e){}}
+    function toggleBlurTokens(c){blurTokensEnabled=c;renderTokenPools();}
+    function toggleAds(c){adsEnabled=c;try{localStorage.setItem('adsEnabled',c);}catch(e){}document.getElementById('adsToggleEnv').checked=c;renderAd();}
+    async function fetchAds(){if(!adsEnabled)return;try{const r=await fetch('/api/ads');if(!r.ok)return;const d=await r.json();let a=[];if(Array.isArray(d))a=d;else if(d&&d.ads&&Array.isArray(d.ads))a=d.ads;if(a.length>0){adsList=a.map(ad=>({adHtml:ad.html||ad.body||'',adTitle:ad.title||ad.name||'',adLink:ad.clickUrl||ad.ctaUrl||ad.link||ad.url||'#',adImage:ad.favicon||ad.image||ad.thumbnail||ad.logo||'',adSponsor:ad.sponsor||ad.advertiser||ad.company||'',adCallToAction:ad.cta||ad.callToAction||'',adImpUrl:ad.impUrl||ad.impressionUrl||ad.pixelUrl||''}));currentAdIdx=0;adImpressionSent.clear();try{localStorage.setItem('_cachedAds',JSON.stringify(adsList));}catch(e){}}else if(adsList.length===0){try{const c=localStorage.getItem('_cachedAds');if(c)adsList=JSON.parse(c);}catch(e){}}}catch(e){if(adsList.length===0){try{const c=localStorage.getItem('_cachedAds');if(c)adsList=JSON.parse(c);}catch(e2){}}}}
+    function rotateAd(){if(!adsEnabled||adsList.length===0)return;currentAdIdx=(currentAdIdx+1)%adsList.length;goToAdSlide(currentAdIdx);}
+    function prevAd(){if(!adsEnabled||adsList.length===0)return;currentAdIdx=(currentAdIdx-1+adsList.length)%adsList.length;goToAdSlide(currentAdIdx);}
+    function nextAd(){if(!adsEnabled||adsList.length===0)return;currentAdIdx=(currentAdIdx+1)%adsList.length;goToAdSlide(currentAdIdx);}
+    function goToAdSlide(idx){const s=document.querySelectorAll('.ad-slide');const d=document.querySelectorAll('.ad-dot');s.forEach((el,i)=>el.classList.toggle('active',i===idx));d.forEach((el,i)=>el.classList.toggle('active',i===idx));currentAdIdx=idx;const l=document.getElementById('adCounterLabel');if(l&&adsList.length>0)l.textContent=(idx+1)+'/'+adsList.length;const ad=adsList[idx];if(ad&&ad.adImpUrl&&!adImpressionSent.has(idx)){adImpressionSent.add(idx);fetch('/api/ads/impression',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({impUrl:ad.adImpUrl,mode:'LITE'})}).catch(()=>{});}}
+    function renderAd(){const c=document.getElementById('adSlidesContainer');const d=document.getElementById('adDots');const l=document.getElementById('adCounterLabel');if(!c||!d)return;if(!adsEnabled){c.innerHTML='<span class="text-sm text-muted">Ads disabled</span>';d.innerHTML='';if(l)l.textContent='';return;}if(adsList.length===0){c.innerHTML='<span class="text-sm text-muted">No ads</span>';d.innerHTML='';if(l)l.textContent='';return;}if(currentAdIdx>=adsList.length)currentAdIdx=0;c.innerHTML=adsList.map((ad,i)=>{let inner='';if(ad.adHtml){inner=ad.adHtml;}else if(ad.adImage||ad.adTitle){inner='<div class="ad-content">'+(ad.adImage?'<img src="'+escapeHtml(ad.adImage)+'" alt="" class="ad-img">':'')+'<div class="ad-text">'+(ad.adSponsor?'<span class="ad-sponsor">'+escapeHtml(ad.adSponsor)+'</span>':'')+(ad.adTitle?'<span class="ad-title">'+escapeHtml(ad.adTitle)+'</span>':'')+(ad.adDescription?'<span class="ad-desc">'+escapeHtml(ad.adDescription)+'</span>':'')+'</div>'+(ad.adCallToAction?'<a href="'+escapeHtml(ad.adLink)+'" target="_blank" rel="noopener sponsored" class="ad-cta">'+escapeHtml(ad.adCallToAction)+'</a>':'')+'</div>';}if(!inner)inner='<span class="text-sm text-muted">No ad content</span>';return '<div class="ad-slide'+(i===currentAdIdx?' active':'')+'">'+inner+'</div>';}).join('');d.innerHTML=adsList.map((_,i)=>'<span class="ad-dot'+(i===currentAdIdx?' active':'')+'" onclick="goToAdSlide('+i+')"><span class="dot-indicator"></span></span>').join('');if(l)l.textContent=adsList.length>1?(currentAdIdx+1)+'/'+adsList.length:'';}
+    async function loadConfiguration(){try{const hr=await fetch('/healthz');proxyData=await hr.json();if(proxyData.started_at)startTime=new Date(proxyData.started_at);const cr=await fetch('/api/config');const cd=await cr.json();if(cd){const cfg=cd.config||cd;config=cfg;enabledModels=Array.isArray(cfg.enabledModels)?cfg.enabledModels:[];if(document.getElementById('listenAddr'))document.getElementById('listenAddr').value=cfg.listenAddr||':8080';if(document.getElementById('upstreamUrl'))document.getElementById('upstreamUrl').value=cfg.upstreamBaseURL||'https://www.codebuff.com';if(document.getElementById('rotationInterval'))document.getElementById('rotationInterval').value=cfg.rotationInterval||'6h';if(document.getElementById('requestTimeout'))document.getElementById('requestTimeout').value=cfg.requestTimeout||'15m';if(document.getElementById('wallpaperToggle'))document.getElementById('wallpaperToggle').checked=cfg.enableWallpaper!==false;}const mr=await fetch('/api/models');const md=await mr.json();if(md&&md.models){models=md.models;modelMetadata=md.model_metadata||{};renderModels();}renderTokenPools();updateStats();}catch(e){showToast('Failed to load configuration','danger');}}
+    function renderTokenPools(){const c=document.getElementById('tokenPoolsContainer');const a=document.getElementById('tokenAlertBanner');a.innerHTML='';if(!proxyData||!proxyData.token_state||proxyData.token_state.length===0){c.innerHTML='<div class="no-tokens"><div class="no-tokens-icon"><i class="bi bi-key"></i></div><div class="no-tokens-text">No tokens detected</div><button class="btn-primary-ghost" onclick="startOAuth()"><i class="bi bi-shield-lock-fill"></i>Generate Auth Token</button></div>';return;}const dead=proxyData.token_state.filter(t=>t.health_status==='banned'||t.health_status==='unauthorized');if(dead.length>0){const b=dead.filter(t=>t.health_status==='banned').length;const u=dead.filter(t=>t.health_status==='unauthorized').length;const p=[];if(b>0)p.push(b+' banned');if(u>0)p.push(u+' unauthorized');a.innerHTML='<div class="alert-banner danger"><i class="bi bi-exclamation-triangle-fill"></i><strong>'+dead.length+' token(s) unusable:</strong> '+p.join(', ')+'. Only '+(proxyData.usable_tokens||0)+' usable token(s) remain.</div>';}c.innerHTML=proxyData.token_state.map(pool=>{const health=pool.health_status||'unknown';const ss=pool.session_status||'none';const lm=pool.locked_model||null;const cc=lm?'token-card locked':'token-card';const rl=pool.rate_limit;let uh='';if(rl&&rl.limit>0){const pct=Math.min(100,Math.round((rl.recentCount/rl.limit)*100));const bc=pct>=100?'high':pct>=80?'medium':'low';const wh=rl.windowHours||24;const br=wh>0&&rl.recentCount>0?(rl.recentCount/wh).toFixed(2):'-';uh='<div class="token-usage-header"><span>'+rl.recentCount+' / '+rl.limit+' sessions</span><span>'+(rl.model?escapeHtml(rl.model.split('/').pop()):'')+'</span></div><div class="token-usage-bar"><div class="token-usage-fill '+bc+'" style="width:'+pct+'%"></div></div><div class="token-burn">burning '+br+'/hr</div>';}let sh='<div class="token-session"><span class="session-pip '+(ss==='active'?'active':'inactive')+'"></span>Session: '+(ss.charAt(0).toUpperCase()+ss.slice(1))+'</div>';let mh='';if(pool.session_instance_id)mh+='<span><i class="bi bi-hash"></i>'+pool.session_instance_id.substring(0,12)+'...</span>';if(pool.session_expires_at)mh+='<span><i class="bi bi-clock"></i>Expires '+new Date(pool.session_expires_at).toLocaleTimeString()+'</span>';const lb=lm?'<div class="locked-badge"><i class="bi bi-lock-fill"></i>Locked: '+escapeHtml(lm)+'<button class="unlock-btn" onclick="unlockSession()">Unlock</button></div>':'';const he=pool.health_error?'<div class="token-error">'+escapeHtml(pool.health_error)+'</div>':'';return '<div class="'+cc+'" data-glass><div class="glass-panel"></div><div class="card-content"><div class="token-header"><div class="token-name">'+pool.name+'</div><div class="token-health '+health+'"><span class="dot"></span>'+(health.charAt(0).toUpperCase()+health.slice(1).replace('_',' '))+'</div></div>'+sh+uh+(mh?'<div class="token-meta">'+mh+'</div>':'')+lb+he+'</div></div>';}).join('');}
+    async function unlockSession(){try{const r=await fetch('/api/session/unlock',{method:'POST'});const d=await r.json();if(d.ok){showToast('Unlocked '+d.unlocked_count+' session(s)','success');await checkHealth();}else{showToast(d.error||'Unlock failed','danger');}}catch(e){showToast('Unlock failed: '+e.message,'danger');}}
+    function getModelDisplayName(m){const meta=modelMetadata[m];if(meta)return (meta.premium?'[LIM] ':'')+meta.displayName;return m.split('/').pop();}
+    function renderModels(){const c=document.getElementById('modelsContainer');document.getElementById('modelCountBadge').textContent=enabledModels.length+'/'+models.length;if(models.length===0){c.innerHTML='<p class="text-muted text-sm">No models available</p>';return;}c.innerHTML='<div class="flex flex-wrap" style="gap:3px">'+models.map((m,idx)=>{const ie=enabledModels.includes(m);return '<div class="model-tag'+(ie?' enabled':'')+'" onclick="toggleModel('+idx+')" id="model-'+idx+'"><input type="checkbox" class="form-check-input"'+(ie?' checked':'')+'><div><div class="model-tag-name">'+escapeHtml(getModelDisplayName(m))+'</div><div class="model-tag-id" title="'+escapeHtml(m)+'">'+escapeHtml(m)+'</div></div></div>';}).join('')+'</div>';}
+    function toggleModel(idx){const m=models[idx];const t=document.getElementById('model-'+idx);const cb=t.querySelector('input[type="checkbox"]');const ie=t.classList.contains('enabled');if(ie){t.classList.remove('enabled');cb.checked=false;enabledModels=enabledModels.filter(x=>x!==m);}else{t.classList.add('enabled');cb.checked=true;if(!enabledModels.includes(m))enabledModels.push(m);}fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabledModels})}).catch(()=>{});document.getElementById('modelCountBadge').textContent=enabledModels.length+'/'+models.length;showToast(getModelDisplayName(m)+' '+(ie?'disabled':'enabled'),'info');}
+    async function startOAuth(){const c=document.getElementById('oauthContainer');c.className='';c.innerHTML='<div class="card" data-glass><div class="glass-panel"></div><div class="card-content p-4 text-center"><div class="spinner spinner-accent" style="margin:0 auto var(--space-3);"></div><p class="text-muted text-sm">Generating login URL...</p></div></div>';try{const r=await fetch('/api/auth/start',{method:'POST'});const d=await r.json();if(!d.loginUrl)throw new Error('No login URL received');oauthSession=d;c.innerHTML='<div class="card" data-glass style="margin-bottom:12px;"><div class="glass-panel"></div><div class="card-content p-4"><div class="mb-2"><label class="form-label">Step 1: Open Login URL</label><div class="input-group"><input type="text" class="form-control" id="oauthLoginUrl" value="'+escapeHtml(d.loginUrl)+'" readonly><button class="btn-ghost btn-xs" onclick="copyToClipboard(\'oauthLoginUrl\')">Copy</button><a class="btn-primary-ghost btn-xs" href="'+escapeHtml(d.loginUrl)+'" target="_blank" style="text-decoration:none;">Open</a></div></div><div class="mb-2"><label class="form-label">Step 2: Paste Callback URL</label><input type="text" class="form-control" id="oauthCallbackUrl" placeholder="Paste the callback URL after login..."></div><button class="btn-primary-ghost w-full" onclick="verifyOAuth()"><i class="bi bi-check-circle"></i>Verify & Fetch Token</button><div id="oauthProgress" class="hidden" style="margin-top:10px;"><div class="progress"><div class="progress-bar" style="width:100%;"></div></div></div></div></div>';startOAuthPolling();}catch(e){c.innerHTML='<div class="card" data-glass><div class="glass-panel"></div><div class="card-content p-4 text-center"><i class="bi bi-exclamation-triangle" style="font-size:2rem;color:var(--danger);"></i><p class="mt-2 text-muted">'+e.message+'</p><button class="btn-primary-ghost mt-2" onclick="startOAuth()">Try Again</button></div></div>';}}
 
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
-  <script>
-    const SURFACE_FNS = { convex_squircle: (x) => Math.pow(1 - Math.pow(1 - x, 4), 0.25) };
-    function calcRefractionProfile(t, b, hf, ior, s) {
-      s = s || 128; const eta = 1 / ior; const p = new Float64Array(s);
-      function refr(nx, ny) { const d = ny, k = 1 - eta * eta * (1 - d * d); if (k < 0) return null; const sq = Math.sqrt(k); return [-(eta * d + sq) * nx, eta - (eta * d + sq) * ny]; }
-      for (let i = 0; i < s; i++) { const x = i / s, y = hf(x), dx = x < 1 ? .0001 : -.0001, y2 = hf(x + dx), deriv = (y2 - y) / dx, mag = Math.sqrt(deriv * deriv + 1), ref = refr(-deriv / mag, -1 / mag); if (!ref) { p[i] = 0; continue; } p[i] = ref[0] * ((y * b + t) / ref[1]); }
-      return p;
-    }
-    function genDispMap(w, h, r, bw, prof, maxD) {
-      const c = document.createElement('canvas'); c.width = w; c.height = h; const ctx = c.getContext('2d'), img = ctx.createImageData(w, h), d = img.data;
-      for (let i = 0; i < d.length; i += 4) { d[i] = 128; d[i + 1] = 128; d[i + 2] = 0; d[i + 3] = 255; }
-      const rSq = r * r, r1Sq = (r + 1) ** 2, rBSq = Math.max(r - bw, 0) ** 2, wB = w - r * 2, hB = h - r * 2, S = prof.length;
-      for (let y1 = 0; y1 < h; y1++) for (let x1 = 0; x1 < w; x1++) { const x = x1 < r ? x1 - r : x1 >= w - r ? x1 - r - wB : 0, y = y1 < r ? y1 - r : y1 >= h - r ? y1 - r - hB : 0, dSq = x * x + y * y; if (dSq > r1Sq || dSq < rBSq) continue; const dist = Math.sqrt(dSq), fromSide = r - dist, op = dSq < rSq ? 1 : 1 - (dist - Math.sqrt(rSq)) / (Math.sqrt(r1Sq) - Math.sqrt(rSq)); if (op <= 0 || dist === 0) continue; const cos = x / dist, sin = y / dist, bi = Math.min(((fromSide / bw) * S) | 0, S - 1), disp = prof[bi] || 0, dX = (-cos * disp) / maxD, dY = (-sin * disp) / maxD, idx = (y1 * w + x1) * 4; d[idx] = (128 + dX * 127 * op + .5) | 0; d[idx + 1] = (128 + dY * 127 * op + .5) | 0; }
-      ctx.putImageData(img, 0, 0); return c.toDataURL();
-    }
-    function genSpecMap(w, h, r, bw, angle) {
-      angle = angle != null ? angle : Math.PI / 3; const c = document.createElement('canvas'); c.width = w; c.height = h; const ctx = c.getContext('2d'), img = ctx.createImageData(w, h), d = img.data; d.fill(0);
-      const rSq = r * r, r1Sq = (r + 1) ** 2, rBSq = Math.max(r - bw, 0) ** 2, wB = w - r * 2, hB = h - r * 2, sv = [Math.cos(angle), Math.sin(angle)];
-      for (let y1 = 0; y1 < h; y1++) for (let x1 = 0; x1 < w; x1++) { const x = x1 < r ? x1 - r : x1 >= w - r ? x1 - r - wB : 0, y = y1 < r ? y1 - r : y1 >= h - r ? y1 - r - hB : 0, dSq = x * x + y * y; if (dSq > r1Sq || dSq < rBSq) continue; const dist = Math.sqrt(dSq), fromSide = r - dist, op = dSq < rSq ? 1 : 1 - (dist - Math.sqrt(rSq)) / (Math.sqrt(r1Sq) - Math.sqrt(rSq)); if (op <= 0 || dist === 0) continue; const cos = x / dist, sin = -y / dist, dot = Math.abs(cos * sv[0] + sin * sv[1]), edge = Math.sqrt(Math.max(0, 1 - (1 - fromSide) ** 2)), coeff = dot * edge, col = (255 * coeff) | 0, alpha = (col * coeff * op) | 0, idx = (y1 * w + x1) * 4; d[idx] = col; d[idx + 1] = col; d[idx + 2] = col; d[idx + 3] = alpha; }
-      ctx.putImageData(img, 0, 0); return c.toDataURL();
-    }
+    function startOAuthPolling(){if(oauthPollTimer)clearInterval(oauthPollTimer);let attempts=0;oauthPollTimer=setInterval(async()=>{attempts++;if(attempts>60){clearInterval(oauthPollTimer);const p=document.getElementById('oauthProgress');if(p)p.className='hidden';showToast('OAuth timeout','warning');return;}try{const r=await fetch('/api/auth/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fingerprintId:oauthSession.fingerprintId,fingerprintHash:oauthSession.fingerprintHash,expiresAt:oauthSession.expiresAt})});const d=await r.json();if(d.user&&d.user.authToken){clearInterval(oauthPollTimer);document.getElementById('oauthContainer').innerHTML='<div class="card" data-glass><div class="glass-panel"></div><div class="card-content p-4 text-center"><div class="badge-success" style="margin:0 auto var(--space-3);"><i class="bi bi-check-circle"></i>Authenticated</div><div class="oauth-success-text">'+escapeHtml(d.user.email||d.user.name)+'</div><p class="text-muted text-xs">Token added!</p><button class="btn-primary-ghost mt-2" onclick="startOAuth()">Generate Another</button></div></div>';showToast('Auth token added successfully','success');loadConfiguration();}}catch(e){}},2000);}
 
-    function initLiquidGlass() {
-      const cards = document.querySelectorAll('[data-glass]'), defs = document.getElementById('glass-defs');
-      defs.innerHTML = '';
-      cards.forEach(c => { const p = c.querySelector('.glass-panel'); if (p) { p.style.backdropFilter = ''; p.style.webkitBackdropFilter = ''; } });
-      let fi = 0;
-      cards.forEach(card => {
-        const panel = card.querySelector('.glass-panel');
-        if (!panel) return;
-        requestAnimationFrame(() => {
-          const rect = card.getBoundingClientRect();
-          if (rect.width < 2 || rect.height < 2) return;
-          const w = Math.round(rect.width), h = Math.round(rect.height), radius = 12, bezelW = 30, glassThick = 60, ior = 2.5, blurAmt = 0.3, specOpacity = 0.5, specSat = 4;
-          const profile = calcRefractionProfile(glassThick, bezelW, SURFACE_FNS.convex_squircle, ior, 128);
-          const maxD = Math.max(...Array.from(profile).map(Math.abs)) || 1;
-          const dispUrl = genDispMap(w, h, radius, bezelW, profile, maxD);
-          const specUrl = genSpecMap(w, h, radius, bezelW * 2.5);
-          const filterId = 'lg-' + (fi++);
-          const filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
-          filter.setAttribute('id', filterId); filter.setAttribute('x', '-20%'); filter.setAttribute('y', '-20%'); filter.setAttribute('width', '140%'); filter.setAttribute('height', '140%');
-          filter.innerHTML = `<feGaussianBlur in="SourceGraphic" stdDeviation="${blurAmt}" result="blurred_source"/><feImage href="${dispUrl}" x="0" y="0" width="${w}" height="${h}" result="disp_map"/><feDisplacementMap in="blurred_source" in2="disp_map" scale="${maxD * 1}" xChannelSelector="R" yChannelSelector="G" result="displaced"/><feColorMatrix in="displaced" type="saturate" values="${specSat}" result="displaced_sat"/><feImage href="${specUrl}" x="0" y="0" width="${w}" height="${h}" result="spec_layer"/><feComposite in="displaced_sat" in2="spec_layer" operator="in" result="spec_masked"/><feComponentTransfer in="spec_layer" result="spec_faded"><feFuncA type="linear" slope="${specOpacity}"/></feComponentTransfer><feBlend in="spec_masked" in2="displaced" mode="normal" result="with_sat"/><feBlend in="spec_faded" in2="with_sat" mode="normal"/>`;
-          defs.appendChild(filter);
-          panel.style.backdropFilter = `url(#${filterId})`;
-          panel.style.webkitBackdropFilter = `url(#${filterId})`;
-          void panel.offsetHeight;
-        });
-      });
-    }
-
-    let resizeTimer;
-    window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(initLiquidGlass, 150); });
-
-    let proxyData = null;
-    let config = {};
-    let models = [];
-    let modelMetadata = {};
-    let enabledModels = [];
-    let blurTokensEnabled = false;
-    let oauthSession = null;
-    let oauthPollTimer = null;
-    let adsEnabled = true;
-    let remainingMsAtFetch = 0;
-    let remainingMsTimestamp = 0;
-    let countryCodeSet = false;
-    let adsList = [];
-    let currentAdIdx = 0;
-    let adImpressionSent = new Set();
-
-    function showToast(message, type = 'info') {
-      const toast = document.createElement('div');
-      toast.className = `toast align-items-center text-white bg-${type} border-0 show`;
-      toast.innerHTML = `<div class="d-flex"><div class="toast-body">${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
-      document.getElementById('toastContainer').appendChild(toast);
-      setTimeout(() => toast.remove(), 3000);
-    }
-
-    async function fetchBingWallpaper() {
-      try {
-        const r = await fetch('/api/bg');
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const data = await r.json();
-        if (data.url) {
-          document.body.style.backgroundImage = `url("${data.url}")`;
-          document.body.style.backgroundRepeat = 'no-repeat';
-          document.body.style.backgroundPosition = 'center';
-          document.body.style.backgroundSize = 'cover';
-          document.body.style.backgroundAttachment = 'fixed';
-          document.body.style.backgroundColor = '#0d1117';
-        }
-      } catch (e) {
-        document.body.style.backgroundImage = 'none';
-        document.body.style.backgroundColor = '#0d1117';
-      }
-    }
-
-    async function saveConfigValue(elementId, configKey) {
-      const value = document.getElementById(elementId).value;
-      const payload = {};
-      payload[configKey] = value;
-      try {
-        const resp = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        const data = await resp.json();
-        if (data.success) { showToast(configKey + ' saved', 'info'); config = data.config; }
-      } catch (e) {}
-    }
-
-    async function toggleWallpaper() {
-      const checked = document.getElementById('wallpaperToggle').checked;
-      config.enableWallpaper = checked;
-      fetchBingWallpaper();
-      try {
-        const resp = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enableWallpaper: checked }) });
-        const data = await resp.json();
-        if (data.success) { showToast('Wallpaper setting saved', 'info'); config = data.config; }
-      } catch (e) {}
-    }
-
-    function toggleBlurTokens(checked) {
-      blurTokensEnabled = checked;
-      renderTokenPools();
-    }
-
-    function toggleAds(checked) {
-      adsEnabled = checked;
-      try { localStorage.setItem('adsEnabled', checked); } catch (e) {}
-      const toggleEnv = document.getElementById('adsToggleEnv');
-      if (toggleEnv) toggleEnv.checked = checked;
-      if (!checked) {
-        const slidesContainer = document.getElementById('adSlidesContainer');
-        const dotsContainer = document.getElementById('adDots');
-        const counterLabel = document.getElementById('adCounterLabel');
-        if (slidesContainer) slidesContainer.innerHTML = '<div style="font-size:12px;color:rgba(13,17,23,0.4);text-align:center;padding:12px 0">Ads disabled</div>';
-        if (dotsContainer) dotsContainer.innerHTML = '';
-        if (counterLabel) counterLabel.textContent = 'Ads off';
-        const arrows = document.querySelectorAll('.ad-arrow');
-        arrows.forEach(a => a.style.display = 'none');
-      } else {
-        const arrows = document.querySelectorAll('.ad-arrow');
-        arrows.forEach(a => a.style.display = '');
-        fetchAds().then(() => { renderAdInTokenCard(); setTimeout(() => initLiquidGlass(), 100); });
-      }
-    }
-
-    async function fetchAds() {
-      if (!adsEnabled) return;
-      try {
-        const resp = await fetch('/api/ads');
-        if (!resp.ok) return;
-        const data = await resp.json();
-        let ads = [];
-        if (Array.isArray(data)) ads = data;
-        else if (data && data.ads && Array.isArray(data.ads)) ads = data.ads;
-        if (ads.length > 0) {
-          adsList = ads.map(ad => ({
-            adHtml: ad.html || ad.body || '',
-            adTitle: ad.title || ad.name || '',
-            adLink: ad.clickUrl || ad.ctaUrl || ad.link || ad.url || '#',
-            adImage: ad.favicon || ad.image || ad.thumbnail || ad.logo || '',
-            adSponsor: ad.sponsor || ad.advertiser || ad.company || '',
-            adCallToAction: ad.cta || ad.callToAction || '',
-            adDescription: ad.adText || ad.description || '',
-            adImpUrl: ad.impUrl || ad.impressionUrl || ad.pixelUrl || ''
-          }));
-          currentAdIdx = 0;
-          adImpressionSent.clear();
-          try { localStorage.setItem('_cachedAds', JSON.stringify(adsList)); } catch (e) {}
-        } else if (adsList.length === 0) {
-          try { const cached = localStorage.getItem('_cachedAds'); if (cached) adsList = JSON.parse(cached); } catch (e) {}
-        }
-      } catch (e) {
-        if (adsList.length === 0) {
-          try { const cached = localStorage.getItem('_cachedAds'); if (cached) adsList = JSON.parse(cached); } catch (e2) {}
-        }
-      }
-    }
-
-    function rotateAd() {
-      if (!adsEnabled || adsList.length === 0) return;
-      currentAdIdx = (currentAdIdx + 1) % adsList.length;
-      goToAdSlide(currentAdIdx);
-    }
-
-    function prevAd() {
-      if (!adsEnabled || adsList.length === 0) return;
-      currentAdIdx = (currentAdIdx - 1 + adsList.length) % adsList.length;
-      goToAdSlide(currentAdIdx);
-    }
-
-    function nextAd() {
-      if (!adsEnabled || adsList.length === 0) return;
-      currentAdIdx = (currentAdIdx + 1) % adsList.length;
-      goToAdSlide(currentAdIdx);
-    }
-
-    function goToAdSlide(idx) {
-      const slides = document.querySelectorAll('.ad-slide');
-      const dots = document.querySelectorAll('.ad-dot');
-      slides.forEach((s, i) => s.classList.toggle('active', i === idx));
-      dots.forEach((d, i) => d.classList.toggle('active', i === idx));
-      currentAdIdx = idx;
-      const counterLabel = document.getElementById('adCounterLabel');
-      if (counterLabel && adsList.length > 0) {
-        counterLabel.textContent = 'Ad ' + (idx + 1) + '/' + adsList.length;
-      }
-      const ad = adsList[idx];
-      if (ad && ad.adImpUrl && !adImpressionSent.has(idx)) {
-        adImpressionSent.add(idx);
-        fetch('/api/ads/impression', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ impUrl: ad.adImpUrl, mode: 'LITE' }) }).catch(() => {});
-      }
-    }
-
-    function renderAdInTokenCard() {
-      const slidesContainer = document.getElementById('adSlidesContainer');
-      const dotsContainer = document.getElementById('adDots');
-      const counterLabel = document.getElementById('adCounterLabel');
-      const arrows = document.querySelectorAll('.ad-arrow');
-      if (!slidesContainer || !dotsContainer) return;
-      if (!adsEnabled) {
-        slidesContainer.innerHTML = '<div style="font-size:12px;color:rgba(13,17,23,0.4);text-align:center;padding:12px 0">Ads disabled</div>';
-        dotsContainer.innerHTML = '';
-        if (counterLabel) counterLabel.textContent = 'Ads off';
-        arrows.forEach(a => a.style.display = 'none');
-        return;
-      }
-      arrows.forEach(a => a.style.display = adsList.length > 1 ? '' : 'none');
-      if (adsList.length === 0) {
-        slidesContainer.innerHTML = '<div style="font-size:12px;color:rgba(13,17,23,0.4);text-align:center;padding:12px 0">No ads available</div>';
-        dotsContainer.innerHTML = '';
-        if (counterLabel) counterLabel.textContent = 'Ad';
-        return;
-      }
-      if (currentAdIdx >= adsList.length) currentAdIdx = 0;
-      slidesContainer.innerHTML = adsList.map((ad, i) => {
-        let inner = '';
-        if (ad.adHtml) {
-          inner = ad.adHtml;
-        } else if (ad.adImage || ad.adTitle) {
-          inner = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            ${ad.adImage ? `<img src="${escapeHtml(ad.adImage)}" alt="${escapeHtml(ad.adTitle)}" style="width:40px;height:40px;border-radius:6px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,0.15)">` : ''}
-            <div style="flex:1;min-width:0">
-              ${ad.adSponsor ? `<div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.4);margin-bottom:1px;text-align:left">${escapeHtml(ad.adSponsor)}</div>` : ''}
-              ${ad.adTitle ? `<div style="font-weight:600;font-size:12px;color:#0d1117;margin-bottom:1px;text-align:left">${escapeHtml(ad.adTitle)}</div>` : ''}
-              ${ad.adDescription ? `<div style="font-size:10px;color:rgba(13,17,23,0.5);line-height:1.3;text-align:left">${escapeHtml(ad.adDescription)}</div>` : ''}
-            </div>
-            ${ad.adCallToAction ? `<a href="${escapeHtml(ad.adLink)}" target="_blank" rel="noopener sponsored" style="background:rgba(13,17,23,0.1);border:1px solid rgba(13,17,23,0.2);color:#0d1117;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:600;white-space:nowrap;flex-shrink:0;text-decoration:none">${escapeHtml(ad.adCallToAction)}</a>` : ''}
-          </div>`;
-        }
-        if (!inner) inner = '<div style="font-size:12px;color:rgba(13,17,23,0.4)">No ad content</div>';
-        return `<div class="ad-slide${i === currentAdIdx ? ' active' : ''}" style="padding:4px 0">${inner}</div>`;
-      }).join('');
-      dotsContainer.innerHTML = adsList.map((_, i) => `<span class="ad-dot${i === currentAdIdx ? ' active' : ''}" onclick="goToAdSlide(${i})"><span class="dot-indicator"></span></span>`).join('');
-      if (counterLabel) counterLabel.textContent = adsList.length > 1 ? 'Ad ' + (currentAdIdx + 1) + '/' + adsList.length : 'Ad';
-    }
-
-    async function loadConfiguration() {
-      try {
-        const healthResponse = await fetch('/healthz');
-        proxyData = await healthResponse.json();
-        const configResponse = await fetch('/api/config');
-        const configData = await configResponse.json();
-        if (configData) {
-          const cfg = configData.config || configData;
-          config = cfg;
-          enabledModels = Array.isArray(cfg.enabledModels) ? cfg.enabledModels : [];
-          if (document.getElementById('listenAddr')) document.getElementById('listenAddr').value = cfg.listenAddr || ':8080';
-          if (document.getElementById('upstreamUrl')) document.getElementById('upstreamUrl').value = cfg.upstreamBaseURL || 'https://www.codebuff.com';
-          if (document.getElementById('rotationInterval')) document.getElementById('rotationInterval').value = cfg.rotationInterval || '6h';
-          if (document.getElementById('requestTimeout')) document.getElementById('requestTimeout').value = cfg.requestTimeout || '15m';
-          if (document.getElementById('wallpaperToggle')) document.getElementById('wallpaperToggle').checked = cfg.enableWallpaper !== false;
-        }
-        const modelsResponse = await fetch('/api/models');
-        const modelsData = await modelsResponse.json();
-        if (modelsData && modelsData.models) { models = modelsData.models; modelMetadata = modelsData.model_metadata || {}; renderModels(); }
-        renderTokenPools();
-        updateStats();
-      } catch (error) {
-        showToast('Failed to load configuration', 'danger');
-      }
-    }
-
-    function renderTokenPools() {
-      const container = document.getElementById('tokenPoolsContainer');
-      if (!proxyData || !proxyData.token_state || proxyData.token_state.length === 0) {
-        container.innerHTML = `
-          <div class="text-center py-4">
-            <i class="bi bi-key" style="font-size:2rem;color:rgba(255,255,255,0.4)"></i>
-            <p class="mt-2 text-muted">No tokens detected</p>
-            <button class="btn btn-sm btn-white-bg mt-2" onclick="startOAuth()"><i class="bi bi-shield-lock-fill me-1"></i>Generate Auth Token</button>
-          </div>`;
-        return;
-      }
-      const blurClass = blurTokensEnabled ? 'token-blurred' : '';
-      container.innerHTML = proxyData.token_state.map(pool => {
-        const sessionStatus = pool.session_status || 'none';
-        const statusClass = sessionStatus === 'active' ? 'status-online' : 'status-offline';
-        const statusText = sessionStatus.charAt(0).toUpperCase() + sessionStatus.slice(1);
-        const lockedModel = pool.locked_model || null;
-        const cardClass = lockedModel ? 'pool-card locked' : 'pool-card';
-        let runsHtml = '';
-        if (pool.runs && pool.runs.length > 0) {
-          runsHtml = pool.runs.map(run => `<div class="run-item"><span class="run-agent">${run.agent_id}</span><span class="${blurClass}">${run.run_id.substring(0, 8)}... | Inflight: ${run.inflight} | Requests: ${run.request_count}</span></div>`).join('');
-        }
-        let sessionInfo = '';
-        if (pool.session_instance_id) {
-          sessionInfo = `<div style="margin-top:8px;font-size:0.8rem;color:#ffffff;" class="${blurClass}">Session: ${pool.session_instance_id.substring(0,12)}...${pool.session_expires_at ? ' | Expires: ' + new Date(pool.session_expires_at).toLocaleTimeString() : ''}</div>`;
-        }
-        const lockedBadge = lockedModel ? `<div class="locked-model-badge"><i class="bi bi-lock-fill lock-icon"></i><span>Locked: ${escapeHtml(lockedModel)}</span><button class="unlock-btn" onclick="unlockSession()">Unlock</button></div>` : '';
-        return `<div class="${cardClass}"><div class="pool-header"><div class="pool-name">${pool.name}</div><div class="pool-status ${statusClass}">${statusText}</div></div>${runsHtml}${sessionInfo}${lockedBadge}${pool.last_error ? `<div class="text-danger" style="margin-top:8px;font-size:0.8rem;">${pool.last_error}</div>` : ''}</div>`;
-      }).join('');
-    }
-
-    async function unlockSession() {
-      try {
-        const resp = await fetch('/api/session/unlock', { method: 'POST' });
-        const data = await resp.json();
-        if (data.ok) {
-          showToast(`Unlocked ${data.unlocked_count} session(s)`, 'success');
-          await checkHealth();
-        } else {
-          showToast(data.error || 'Unlock failed', 'danger');
-        }
-      } catch (e) {
-        showToast('Unlock failed: ' + e.message, 'danger');
-      }
-    }
-
-    function getModelDisplayName(model) {
-      const meta = modelMetadata[model];
-      if (meta) {
-        const prefix = meta.premium ? '[LIM] ' : '';
-        return prefix + meta.displayName;
-      }
-      return model.split('/').pop();
-    }
-
-    function renderModels() {
-      const container = document.getElementById('modelsContainer');
-      document.getElementById('modelCountBadge').textContent = `${enabledModels.length}/${models.length}`;
-      if (models.length === 0) { container.innerHTML = '<p class="text-muted">No models available</p>'; return; }
-      container.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:3px">${models.map((model, idx) => {
-        const isEnabled = enabledModels.includes(model);
-        return `<div class="model-tag${isEnabled ? ' enabled' : ''}" onclick="toggleModel(${idx})" id="model-${idx}"><input type="checkbox" class="form-check-input"${isEnabled ? ' checked' : ''}><div><div class="model-tag-name">${escapeHtml(getModelDisplayName(model))}</div><div class="model-tag-id" title="${escapeHtml(model)}">${escapeHtml(model)}</div></div></div>`;
-      }).join('')}</div>`;
-    }
-
-    function toggleModel(idx) {
-      const model = models[idx];
-      const tag = document.getElementById(`model-${idx}`);
-      const checkbox = tag.querySelector('input[type="checkbox"]');
-      const isCurrentlyEnabled = tag.classList.contains('enabled');
-      if (isCurrentlyEnabled) {
-        tag.classList.remove('enabled');
-        checkbox.checked = false;
-        enabledModels = enabledModels.filter(m => m !== model);
-      } else {
-        tag.classList.add('enabled');
-        checkbox.checked = true;
-        if (!enabledModels.includes(model)) enabledModels.push(model);
-      }
-      fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabledModels }) });
-      document.getElementById('modelCountBadge').textContent = `${enabledModels.length}/${models.length}`;
-      showToast(`${getModelDisplayName(model)} ${isCurrentlyEnabled ? 'disabled' : 'enabled'}`, 'info');
-    }
-
-    async function startOAuth() {
-      const container = document.getElementById('oauthContainer');
-      container.style.display = 'block';
-      container.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Generating login URL...</p></div>';
-      try {
-        const response = await fetch('/api/auth/start', { method: 'POST' });
-        const data = await response.json();
-        if (!data.loginUrl) throw new Error('No login URL received');
-        oauthSession = data;
-        container.innerHTML = `
-          <div class="mb-3">
-            <label class="form-label">Step 1: Open Login URL</label>
-            <div class="input-group">
-              <input type="text" class="form-control" id="oauthLoginUrl" value="${escapeHtml(data.loginUrl)}" readonly>
-              <button class="btn btn-outline-action" onclick="copyToClipboard('oauthLoginUrl')">Copy</button>
-              <a class="btn btn-white-bg" href="${escapeHtml(data.loginUrl)}" target="_blank">Open</a>
-            </div>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Step 2: Paste Callback URL</label>
-            <input type="text" class="form-control" id="oauthCallbackUrl" placeholder="Paste the callback URL after login...">
-          </div>
-          <button class="btn btn-white-bg w-100" onclick="verifyOAuth()"><i class="bi bi-check-circle me-2"></i>Verify & Fetch Token</button>
-          <div id="oauthProgress" style="display:none;margin-top:10px;"><div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%"></div></div></div>`;
-        startOAuthPolling();
-      } catch (error) {
-        container.innerHTML = `<div class="text-center text-danger py-3"><i class="bi bi-exclamation-triangle" style="font-size:2rem"></i><p class="mt-2">${error.message}</p><button class="btn btn-sm btn-outline-action" onclick="startOAuth()">Try Again</button></div>`;
-      }
-    }
-
-    function startOAuthPolling() {
-      if (oauthPollTimer) clearInterval(oauthPollTimer);
-      let attempts = 0;
-      oauthPollTimer = setInterval(async () => {
-        attempts++;
-        if (attempts > 60) { clearInterval(oauthPollTimer); document.getElementById('oauthProgress').style.display = 'none'; showToast('OAuth timeout', 'warning'); return; }
-        try {
-          const response = await fetch('/api/auth/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fingerprintId: oauthSession.fingerprintId, fingerprintHash: oauthSession.fingerprintHash, expiresAt: oauthSession.expiresAt }) });
-          const data = await response.json();
-          if (data.user && data.user.authToken) {
-            clearInterval(oauthPollTimer);
-            const container = document.getElementById('oauthContainer');
-            container.innerHTML = `<div class="text-center py-3"><div class="badge bg-success mb-3"><i class="bi bi-check-circle me-1"></i>Authenticated</div><p class="text-muted">Token added!</p><p class="fw-medium">${escapeHtml(data.user.email || data.user.name)}</p><button class="btn btn-sm btn-outline-action mt-2" onclick="startOAuth()">Generate Another</button></div>`;
-            showToast('Auth token added successfully', 'success');
-            loadConfiguration();
-          }
-        } catch (e) {}
-      }, 2000);
-    }
-
-    async function verifyOAuth() {
-      const callbackUrl = document.getElementById('oauthCallbackUrl').value.trim();
-      if (!callbackUrl) { showToast('Please paste the callback URL', 'warning'); return; }
-      document.getElementById('oauthProgress').style.display = 'block';
-      try {
-        const authCode = callbackUrl.includes('auth_code=') ? callbackUrl.split('auth_code=')[1].split('&')[0] : callbackUrl;
-        const response = await fetch('/api/auth/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fingerprintId: oauthSession.fingerprintId, fingerprintHash: oauthSession.fingerprintHash, expiresAt: oauthSession.expiresAt, authCode }) });
-        const data = await response.json();
-        if (data.user && data.user.authToken) {
-          clearInterval(oauthPollTimer);
-          document.getElementById('oauthContainer').innerHTML = `<div class="text-center py-3"><div class="badge bg-success mb-3"><i class="bi bi-check-circle me-1"></i>Authenticated</div><p class="text-muted">Token added!</p><p class="fw-medium">${escapeHtml(data.user.email || data.user.name)}</p><button class="btn btn-sm btn-outline-action mt-2" onclick="startOAuth()">Generate Another</button></div>`;
-          showToast('Auth token added successfully', 'success');
-          loadConfiguration();
-        } else {
-          showToast('Verification pending - waiting for login...', 'info');
-        }
-      } catch (error) {
-        document.getElementById('oauthProgress').style.display = 'none';
-        showToast('Verification failed: ' + error.message, 'danger');
-      }
-    }
-
-    function copyToClipboard(elementId) {
-      const el = document.getElementById(elementId);
-      el.select();
-      document.execCommand('copy');
-      showToast('Copied to clipboard', 'info');
-    }
-
-    async function checkHealth(silent = false) {
-      try {
-        const response = await fetch('/healthz');
-        const data = await response.json();
-        if (data.ok) {
-          proxyData = data;
-          document.getElementById('statusIndicator').className = 'status-indicator status-online';
-          document.getElementById('statusText').textContent = 'Online';
-          renderTokenPools();
-          updateStats();
-          if (!silent) showToast('Proxy is healthy', 'success');
-        } else {
-          throw new Error('Unhealthy status');
-        }
-      } catch (error) {
-        document.getElementById('statusIndicator').className = 'status-indicator status-offline';
-        document.getElementById('statusText').textContent = 'Offline';
-        if (!silent) showToast('Proxy health check failed', 'danger');
-      }
-    }
-
-    async function testConnection() {
-      try {
-        const response = await fetch('/v1/models');
-        if (response.ok) {
-          const data = await response.json();
-          showToast(`Connected! ${data.data?.length || 0} models available`, 'success');
-        } else {
-          throw new Error('Connection failed');
-        }
-      } catch (error) {
-        showToast('Connection test failed', 'danger');
-      }
-    }
-
-    function refreshModels() {
-      loadConfiguration();
-      showToast('Models refreshed', 'info');
-    }
-
-    function updateRemainingDisplay() {
-      const el = document.getElementById('tokenRemainingTime');
-      if (!remainingMsAtFetch || !remainingMsTimestamp) { el.textContent = ''; return; }
-      const elapsed = Date.now() - remainingMsTimestamp;
-      const left = Math.max(0, remainingMsAtFetch - elapsed);
-      if (left <= 0) { el.textContent = 'expired'; return; }
-      const totalSec = Math.floor(left / 1000);
-      const hrs = Math.floor(totalSec / 3600);
-      const mins = Math.floor((totalSec % 3600) / 60);
-      const secs = totalSec % 60;
-      el.textContent = (hrs > 0 ? hrs + 'h ' : '') + mins + 'm ' + secs + 's left';
-    }
-
-    function updateStats() {
-      if (!proxyData || !proxyData.token_state) return;
-      document.getElementById('totalModels').textContent = models.length;
-      document.getElementById('startedAt').textContent = new Date(proxyData.started_at).toLocaleString();
-      document.getElementById('tokenCountBadge').textContent = proxyData.token_state.length;
-      const bestToken = proxyData.token_state.find(t => t.country_code) || proxyData.token_state[0];
-      const cc = bestToken?.country_code || '-';
-      const tier = bestToken?.access_tier || '';
-      const el = document.getElementById('countryCode');
-      el.textContent = cc;
-      if (tier === 'limited') {
-        const small = document.createElement('small');
-        small.textContent = '(limit)';
-        small.style.marginLeft = '4px';
-        small.style.opacity = '0.7';
-        el.appendChild(small);
-      }
-      const activeToken = proxyData.token_state.find(t => t.remaining_ms && t.remaining_ms > 0);
-      if (activeToken) {
-        remainingMsAtFetch = activeToken.remaining_ms;
-        remainingMsTimestamp = Date.now();
-      } else {
-        remainingMsAtFetch = 0;
-        remainingMsTimestamp = 0;
-      }
-      updateRemainingDisplay();
-      updateRemainingDisplay();
-      if (proxyData.runtime) {
-        document.getElementById('runtimeInfo').textContent = proxyData.runtime + ' v' + proxyData.runtime_version;
-      }
-    }
-
-    function toggleSection(name) {
-      const body = document.getElementById('section-' + name);
-      const card = body.closest('[data-section]');
-      const icon = card.querySelector('.toggle-icon');
-      body.classList.toggle('collapsed');
-      icon.classList.toggle('collapsed');
-      setTimeout(() => initLiquidGlass(), 50);
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-      initLiquidGlass();
-      try { const cached = localStorage.getItem('adsEnabled'); if (cached === 'false') { adsEnabled = false; const t = document.getElementById('adsToggleEnv'); if (t) t.checked = false; } } catch (e) {}
-      loadConfiguration().then(() => { fetchBingWallpaper(); if (adsEnabled) fetchAds().then(() => { renderAdInTokenCard(); setTimeout(() => initLiquidGlass(), 100); }); else { renderAdInTokenCard(); setTimeout(() => initLiquidGlass(), 100); } });
-      checkHealth();
-      setInterval(() => checkHealth(true), 5000);
-      setInterval(() => rotateAd(), 30000);
-      setInterval(() => updateRemainingDisplay(), 1000);
-    });
-  </script>
+    async function verifyOAuth(){const cu=document.getElementById('oauthCallbackUrl').value.trim();if(!cu){showToast('Please paste the callback URL','warning');return;}const p=document.getElementById('oauthProgress');if(p)p.className='';try{const ac=cu.includes('auth_code=')?cu.split('auth_code=')[1].split('&')[0]:cu;const r=await fetch('/api/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fingerprintId:oauthSession.fingerprintId,fingerprintHash:oauthSession.fingerprintHash,expiresAt:oauthSession.expiresAt,authCode:ac})});const d=await r.json();if(d.user&&d.user.authToken){clearInterval(oauthPollTimer);document.getElementById('oauthContainer').innerHTML='<div class="card" data-glass><div class="glass-panel"></div><div class="card-content p-4 text-center"><div class="badge-success" style="margin:0 auto var(--space-3);"><i class="bi bi-check-circle"></i>Authenticated</div><div class="oauth-success-text">'+escapeHtml(d.user.email||d.user.name)+'</div><p class="text-muted text-xs">Token added!</p><button class="btn-primary-ghost mt-2" onclick="startOAuth()">Generate Another</button></div></div>';showToast('Auth token added successfully','success');loadConfiguration();}else{showToast('Verification pending - waiting for login...','info');}}catch(e){const p2=document.getElementById('oauthProgress');if(p2)p2.className='hidden';showToast('Verification failed: '+e.message,'danger');}}
+    function copyToClipboard(id){const el=document.getElementById(id);el.select();document.execCommand('copy');showToast('Copied to clipboard','info');}
+    async function checkHealth(silent=false){try{const r=await fetch('/healthz');const d=await r.json();if(d.ok){proxyData=d;if(d.started_at)startTime=new Date(d.started_at);const hd=(d.dead_tokens||0)>0;const u=d.usage;const lq=u&&u.remaining<=1&&u.limit>0;const dot=document.getElementById('statusDot');const txt=document.getElementById('statusText');if(hd&&lq){dot.className='status-dot critical';txt.textContent='Critical';}else if(lq){dot.className='status-dot degraded';txt.textContent='Low Quota';}else if(hd){dot.className='status-dot degraded';txt.textContent='Degraded';}else{dot.className='status-dot online';txt.textContent='Online';}renderTokenPools();updateStats();checkModelMismatches(d.model_mismatches);if(!silent)showToast(txt.textContent,lq?'warning':hd?'warning':'success');}else{throw new Error('Unhealthy status');}}catch(e){document.getElementById('statusDot').className='status-dot offline';document.getElementById('statusText').textContent='Offline';if(!silent)showToast('Proxy health check failed','danger');}}
+    async function testConnection(){try{const r=await fetch('/v1/models');if(r.ok){const d=await r.json();showToast('Connected! '+(d.data?.length||0)+' models available','success');}else{throw new Error('Connection failed');}}catch(e){showToast('Connection test failed','danger');}}
+    function refreshModels(){loadConfiguration();showToast('Models refreshed','info');}
+    function updateRemainingDisplay(){const el=document.getElementById('tokenRemainingTime');if(!remainingMsAtFetch||!remainingMsTimestamp){if(el)el.textContent='';return;}const elapsed=Date.now()-remainingMsTimestamp;const left=Math.max(0,remainingMsAtFetch-elapsed);if(left<=0){el.textContent='expired';return;}const ts=Math.floor(left/1000);const h=Math.floor(ts/3600);const m=Math.floor((ts%3600)/60);const s=ts%60;el.textContent=(h>0?h+'h ':'')+m+'m '+s+'s left';}
+    function updateStats(){if(!proxyData||!proxyData.token_state)return;document.getElementById('startedAt').textContent=startTime?startTime.toLocaleString():'-';document.getElementById('tokenCountBadge').textContent=proxyData.token_state.length;const bt=proxyData.token_state.find(t=>t.country_code)||proxyData.token_state[0];const cc=bt?.country_code||'-';const tier=bt?.access_tier||'';const el=document.getElementById('countryCode');el.textContent=cc;if(tier==='limited'){if(!el.querySelector('small')){const s=document.createElement('small');s.textContent='(ltd)';s.style.marginInlineStart='4px';s.style.fontSize='9px';s.style.opacity='0.6';el.appendChild(s);}}const at=proxyData.token_state.find(t=>t.remaining_ms&&t.remaining_ms>0);if(at){remainingMsAtFetch=at.remaining_ms;remainingMsTimestamp=Date.now();}else{remainingMsAtFetch=0;remainingMsTimestamp=0;}updateRemainingDisplay();if(proxyData.usage){usageData=proxyData.usage;const u=proxyData.usage;document.getElementById('usageDisplay').textContent=u.used+'/'+u.limit;document.getElementById('usageRemaining').textContent=u.remaining;document.getElementById('usageBurnRate').textContent=u.burnRate>0?u.burnRate.toFixed(2):'-';const de=document.getElementById('usageDepletion');if(u.estimatedDepletionMinutes&&u.estimatedDepletionMinutes>0){const h=Math.floor(u.estimatedDepletionMinutes/60);const m=u.estimatedDepletionMinutes%60;de.textContent=(h>0?h+'h ':'')+m+'m';}else if(u.remaining<=0){de.textContent='now';}else{de.textContent='-';}}else{document.getElementById('usageDisplay').textContent='-/-';document.getElementById('usageRemaining').textContent='-';document.getElementById('usageBurnRate').textContent='-';document.getElementById('usageDepletion').textContent='-';}updateRemainingDisplay();if(proxyData.runtime){document.getElementById('runtimeInfo').textContent=proxyData.runtime+' v'+proxyData.runtime_version;}updateUptime();}
+    function updateUptime(){const el=document.getElementById('headerUptime');if(!startTime){el.textContent='';return;}const sec=Math.floor((Date.now()-startTime.getTime())/1000);const h=Math.floor(sec/3600);const m=Math.floor((sec%3600)/60);el.textContent='up '+(h>0?h+'h ':'')+m+'m';}
+    function updateUsageCountdown(){const re=document.getElementById('usageReset');const de=document.getElementById('usageDepletion');if(!usageData||!usageData.nextResetAt){if(re)re.textContent='-';return;}const diff=new Date(usageData.nextResetAt).getTime()-Date.now();if(diff<=0){re.textContent='now';if(usageData.remaining>0&&usageData.estimatedDepletionMinutes){const m=usageData.estimatedDepletionMinutes;const h=Math.floor(m/60);de.textContent=(h>0?h+'h ':'')+(m%60)+'m';}}else{const ts=Math.floor(diff/1000);const h=Math.floor(ts/3600);const m=Math.floor((ts%3600)/60);const s=ts%60;re.textContent=(h>0?h+'h ':'')+m+'m '+s+'s';}}
+    function toggleSection(n){const b=document.getElementById('section-'+n);const card=b.closest('[data-section]');const icon=card.querySelector('.toggle-icon');b.classList.toggle('collapsed');icon.classList.toggle('collapsed');}
+    function escapeHtml(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML;}
+    function checkModelMismatches(mismatches){if(!mismatches||mismatches.length===0){lastMismatchCount=0;return;}if(mismatches.length>lastMismatchCount){const newest=mismatches[0];const reason=newest.reason||'unknown';let detail='Requested: '+escapeHtml(newest.requested)+' -> Used: '+escapeHtml(newest.actual);if(newest.token)detail+=' ('+escapeHtml(newest.token)+')';if(reason!=='unknown')detail+=' - '+reason.replace(/_/g,' ');const banner=document.getElementById('mismatchBanner');const det=document.getElementById('mismatchDetail');if(banner&&det){det.textContent=detail;banner.classList.remove('hidden');}showToast('Model mismatch: '+escapeHtml(newest.requested)+' -> '+escapeHtml(newest.actual),'warning');}lastMismatchCount=mismatches.length;}
+    function dismissMismatch(){const b=document.getElementById('mismatchBanner');if(b)b.classList.add('hidden');}
+    document.addEventListener('DOMContentLoaded',()=>{try{const c=localStorage.getItem('adsEnabled');if(c==='false'){adsEnabled=false;const t=document.getElementById('adsToggleEnv');if(t)t.checked=false;}}catch(e){}loadConfiguration().then(()=>{fetchBingWallpaper();if(adsEnabled)fetchAds().then(()=>{renderAd();});else{renderAd();}});checkHealth();setInterval(()=>checkHealth(true),5000);setInterval(()=>rotateAd(),30000);setInterval(()=>updateRemainingDisplay(),1000);setInterval(()=>updateUsageCountdown(),1000);setInterval(()=>updateUptime(),5000);});
+</script>
 </body>
 </html>
