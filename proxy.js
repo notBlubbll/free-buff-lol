@@ -99,6 +99,15 @@ const CODEBUFF_ACCEPT_ENCODING = 'gzip, deflate';
 const CODEBUFF_JSON_USER_AGENT = 'Bun/1.3.11';
 const FREEBUFF_CLI_USER_AGENT = 'Freebuff-CLI/0.0.105';
 
+const DEBUG_LOG_PATH = path.join(__dirname, '.config', 'debug-luna.log');
+function debugLog(entry) {
+  try {
+    const configDir = path.join(__dirname, '.config');
+    if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+    fs.appendFileSync(DEBUG_LOG_PATH, JSON.stringify({ ts: new Date().toISOString(), ...entry }, null, 2) + '\n---\n');
+  } catch (_) {}
+}
+
 function canonicalModelName(model) {
   return CANONICAL_MODEL_ALIASES[model] || model;
 }
@@ -253,8 +262,9 @@ function loadConfig() {
   if (process.env.LOG_LEVEL) rawConfig.LOG_LEVEL = process.env.LOG_LEVEL;
   if (process.env.TOKEN_REVALIDATE_INTERVAL) rawConfig.TOKEN_REVALIDATE_INTERVAL = process.env.TOKEN_REVALIDATE_INTERVAL;
   if (!rawConfig.AUTH_TOKENS || rawConfig.AUTH_TOKENS.length === 0) {
-    const cliTokens = loadFreebuffCLITokens();
-    if (cliTokens.length > 0) { rawConfig.AUTH_TOKENS = cliTokens; logInfo(`Loaded ${cliTokens.length} token(s) from Freebuff CLI`); }
+    const cliResult = loadFreebuffCLITokens();
+    const cliFallback = cliResult.tokens || cliResult;
+    if (cliFallback.length > 0) { rawConfig.AUTH_TOKENS = cliFallback; logInfo(`Loaded ${cliFallback.length} token(s) from Freebuff CLI`); }
   }
   const requestTimeout = parseDuration(rawConfig.REQUEST_TIMEOUT);
   if (!rawConfig.LISTEN_ADDR) throw new Error('LISTEN_ADDR cannot be empty');
@@ -264,10 +274,11 @@ function loadConfig() {
   if (tokenRevalidateInterval <= 0) throw new Error('TOKEN_REVALIDATE_INTERVAL must be greater than zero');
   let baseURL = rawConfig.UPSTREAM_BASE_URL.trim().replace(/\/+$/, '');
   try { const parsed = new URL(baseURL); if (parsed.host.toLowerCase() === 'codebuff.com') { parsed.host = 'www.codebuff.com'; baseURL = parsed.toString().replace(/\/+$/, ''); } } catch (e) {}
-  return {
+  const result = {
     listenAddr: rawConfig.LISTEN_ADDR,
     upstreamBaseURL: baseURL,
     authTokens: [...new Set(rawConfig.AUTH_TOKENS || [])],
+    tokenEmails: rawConfig.TOKEN_EMAILS || {},
     requestTimeout,
     apiKeys: [...new Set(rawConfig.API_KEYS || [])],
     mockCountry: rawConfig.MOCK_COUNTRY || null,
@@ -276,6 +287,8 @@ function loadConfig() {
     logLevel: rawConfig.LOG_LEVEL,
     tokenRevalidateInterval
   };
+  if (result.authTokens.length > 0) logInfo(`[Config] Loaded ${result.authTokens.length} token(s) from config`);
+  return result;
 }
 
 function loadFreebuffCLITokens() {
@@ -368,6 +381,7 @@ function saveConfig(cfg) {
     LISTEN_ADDR: cfg.listenAddr,
     UPSTREAM_BASE_URL: cfg.upstreamBaseURL,
     AUTH_TOKENS: cfg.authTokens,
+    TOKEN_EMAILS: cfg.tokenEmails || {},
     REQUEST_TIMEOUT: `${cfg.requestTimeout / (60 * 1000)}m`,
     API_KEYS: cfg.apiKeys,
     ENABLED_MODELS: cfg.enabledModels || [],
@@ -1047,6 +1061,9 @@ class UpstreamClient {
 
   chatCompletions(authToken, body) {
     const requestURL = this.baseURL + '/api/v1/chat/completions';
+    if (body && body.model && body.model.includes('luna')) {
+      debugLog({ event: 'fetch_send', url: requestURL, bodyKeys: Object.keys(body), reasoning_effort: body.reasoning_effort, reasoning: body.reasoning });
+    }
     const isStream = body && body.stream === true;
     const headers = this.chatHeaders(authToken, isStream);
     const controller = new AbortController();
@@ -2051,6 +2068,9 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     const requestedDisplay = actualModel !== requestedModel ? ` (locked from ${requestedModel})` : '';
     const chatRunId = isGemini ? run.chatRunId : run.runId;
     logInfo(`[Request] model: ${actualModel}${requestedDisplay}, run: ${run.runId}${isGemini ? ` (child: ${chatRunId})` : ''}, tier: ${accessTier || 'normal'}`);
+    if (actualModel && actualModel.includes('luna')) {
+      debugLog({ event: 'client_payload', model: actualModel, originalPayload: JSON.parse(JSON.stringify(payload)) });
+    }
     const userMsg = (payload.messages || []).find(m => m.role === 'user');
     if (userMsg) logDebug(`[Prompt] ${typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content)}`);
 
@@ -2077,18 +2097,34 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     cloned.provider = { data_collection: 'deny' };
     if (!cloned.stop) cloned.stop = ['cb_easp'];
 
-    if (cloned.reasoning_effort !== undefined && cloned.reasoning && cloned.reasoning.effort !== undefined) {
-      if (cloned.reasoning_effort !== cloned.reasoning.effort) {
-        logDebug(`[Normalize] Conflicting reasoning_effort (${cloned.reasoning_effort}) vs reasoning.effort (${cloned.reasoning.effort}), keeping reasoning_effort`);
-      }
-      delete cloned.reasoning.effort;
-      if (Object.keys(cloned.reasoning).length === 0) delete cloned.reasoning;
+    if (cloned.reasoning_effort !== undefined || (cloned.reasoning && cloned.reasoning.effort !== undefined)) {
+      logInfo(`[Normalize] reasoning_effort=${JSON.stringify(cloned.reasoning_effort)}, reasoning.effort=${JSON.stringify(cloned.reasoning && cloned.reasoning.effort)}`);
+    }
+
+    // Upstream (luna etc.) only accepts reasoning.effort, not reasoning_effort.
+    // If client sent reasoning_effort, move it into reasoning.effort.
+    if (cloned.reasoning_effort !== undefined) {
+      if (!cloned.reasoning) cloned.reasoning = {};
+      cloned.reasoning.effort = cloned.reasoning_effort;
+      delete cloned.reasoning_effort;
+    }
+
+    if (actualModel && actualModel.includes('luna')) {
+      debugLog({ event: 'upstream_send', model: actualModel, token: currentToken.substring(0, 8), payload: JSON.parse(JSON.stringify(cloned)) });
     }
 
     let resp;
     try { resp = await client.chatCompletions(currentToken, cloned); } catch (e) {
+      if (actualModel && actualModel.includes('luna')) debugLog({ event: 'upstream_error', model: actualModel, error: e.message });
       writeError(res, 502, e.message, 'server_error', '');
       return;
+    }
+
+    if (actualModel && actualModel.includes('luna') && resp.status >= 400) {
+      const errBody = await readBodyText(resp.body);
+      debugLog({ event: 'upstream_response', model: actualModel, status: resp.status, body: errBody.substring(0, 2000) });
+      // Reconstruct a new response since we consumed the body
+      resp = { status: resp.status, body: require('stream').Readable.from(Buffer.from(errBody)), headers: resp.headers };
     }
 
     if (resp.status === 429) {
@@ -2237,9 +2273,10 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
         };
         cloned.provider = { data_collection: 'deny' };
         if (!cloned.stop) cloned.stop = ['cb_easp'];
-        if (cloned.reasoning_effort !== undefined && cloned.reasoning && cloned.reasoning.effort !== undefined) {
-          delete cloned.reasoning.effort;
-          if (Object.keys(cloned.reasoning).length === 0) delete cloned.reasoning;
+        if (cloned.reasoning_effort !== undefined) {
+          if (!cloned.reasoning) cloned.reasoning = {};
+          cloned.reasoning.effort = cloned.reasoning_effort;
+          delete cloned.reasoning_effort;
         }
         let resp;
         try { resp = await client.chatCompletions(currentToken, cloned); } catch (e) {
@@ -2329,7 +2366,8 @@ function pipeBodyToResponse(body, res) {
 
 async function writeOpenAISuccessResponse(res, resp) {
   for (const [key, values] of Object.entries(resp.headers)) {
-    if (key.toLowerCase() === 'content-length') continue;
+    const k = key.toLowerCase();
+    if (k === 'content-length' || k === 'content-encoding') continue;
     res.setHeader(key, values);
   }
   res.writeHead(resp.status);
@@ -2341,8 +2379,12 @@ async function writeOpenAISuccessResponse(res, resp) {
     model = await pipeBodyToResponseAndCaptureModel(body, res);
   } else {
     const buffer = await readBodyText(resp.body);
-    res.end(buffer);
-    try { const parsed = JSON.parse(buffer); if (parsed.id) messageId = parsed.id; if (parsed.model) model = parsed.model; } catch (e) {}
+    try {
+      const parsed = JSON.parse(buffer);
+      if (parsed.id) messageId = parsed.id; if (parsed.model) model = parsed.model;
+      if (parsed.choices) { for (const c of parsed.choices) { if (c.delta?.reasoning_details) delete c.delta.reasoning_details; if (c.message?.reasoning_details) delete c.message.reasoning_details; } }
+      res.end(JSON.stringify(parsed));
+    } catch (_) { res.end(buffer); }
   }
 
   return { messageId, model };
@@ -2350,29 +2392,43 @@ async function writeOpenAISuccessResponse(res, resp) {
 
 async function pipeBodyToResponseAndCaptureModel(body, res) {
   let model = null;
-  let buffer = '';
-  let captured = false;
+  let lineBuffer = '';
 
   function processChunk(chunk) {
     const str = chunk instanceof Buffer ? chunk.toString() : typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
-    if (!captured) {
-      buffer += str;
-      const match = buffer.match(/data:\s*(\{.*?\})\n\n/);
-      if (match) {
-        captured = true;
-        try { const parsed = JSON.parse(match[1]); if (parsed.model) model = parsed.model; } catch (_) {}
-        res.write(Buffer.from(buffer));
-        buffer = '';
-        return;
+    lineBuffer += str;
+
+    let sepIdx;
+    while ((sepIdx = lineBuffer.indexOf('\n\n')) !== -1) {
+      const event = lineBuffer.substring(0, sepIdx + 2);
+      lineBuffer = lineBuffer.substring(sepIdx + 2);
+
+      const lines = event.split('\n');
+      let out = '';
+      for (const line of lines) {
+        if (line.startsWith('data: ') && line.length > 6) {
+          const jsonStr = line.substring(6);
+          if (jsonStr === '[DONE]') { out += line + '\n'; continue; }
+          try {
+            const parsed = JSON.parse(jsonStr);
+            if (!model && parsed.model) model = parsed.model;
+            if (parsed.choices) {
+              for (const c of parsed.choices) {
+                if (c.delta?.reasoning_details) delete c.delta.reasoning_details;
+              }
+            }
+            out += 'data: ' + JSON.stringify(parsed) + '\n';
+          } catch (_) { out += line + '\n'; }
+        } else { out += line + '\n'; }
       }
+      res.write(Buffer.from(out));
     }
-    res.write(chunk instanceof Buffer ? chunk : Buffer.from(typeof chunk === 'string' ? chunk : chunk));
   }
 
   if (isNodeStream(body)) {
     return new Promise((resolve, reject) => {
       body.on('data', chunk => { processChunk(chunk); });
-      body.on('end', () => { if (!captured) { res.write(Buffer.from(buffer)); } res.end(); resolve(model); });
+      body.on('end', () => { if (lineBuffer) res.write(Buffer.from(lineBuffer)); res.end(); resolve(model); });
       body.on('error', reject);
     });
   }
@@ -2380,7 +2436,7 @@ async function pipeBodyToResponseAndCaptureModel(body, res) {
     const reader = body.getReader();
     function pump() {
       reader.read().then(({ done, value }) => {
-        if (done) { if (!captured) { res.write(Buffer.from(buffer)); } res.end(); resolve(model); return; }
+        if (done) { if (lineBuffer) res.write(Buffer.from(lineBuffer)); res.end(); resolve(model); return; }
         processChunk(value);
         pump();
       }).catch(reject);
@@ -2582,8 +2638,22 @@ async function handleRequest(req, res) {
       const data = await resp.json();
       if (data.user && data.user.authToken) {
         if (!config.authTokens) config.authTokens = [];
-        if (!config.authTokens.includes(data.user.authToken)) { config.authTokens.push(data.user.authToken); saveConfig(config); reloadTokenPool(); logInfo('New auth token added via OAuth'); }
-        data.tokenAdded = true;
+        if (!config.tokenEmails) config.tokenEmails = {};
+        const email = data.user.email || data.user.name || null;
+        if (config.authTokens.includes(data.user.authToken)) {
+          data.tokenAdded = false;
+          data.duplicateReason = 'Token already configured';
+        } else if (email && Object.values(config.tokenEmails).includes(email)) {
+          data.tokenAdded = false;
+          data.duplicateReason = 'Account ' + email + ' is already configured';
+        } else {
+          config.authTokens.push(data.user.authToken);
+          if (email) config.tokenEmails[data.user.authToken] = email;
+          saveConfig(config);
+          reloadTokenPool();
+          logInfo('New auth token added via OAuth' + (email ? ' (' + email + ')' : ''));
+          data.tokenAdded = true;
+        }
       }
       writeJSON(res, 200, data);
     } catch (e) { writeJSON(res, 500, { error: e.message }); }
@@ -2743,6 +2813,7 @@ function startTokenFileWatcher(paths) {
           if (removed.length > 0) {
             logInfo(`[Token Watch] ${removed.length} token(s) removed from credentials`);
             config.authTokens = config.authTokens.filter(t => !removed.includes(t));
+            if (config.tokenEmails) { for (const t of removed) delete config.tokenEmails[t]; }
           }
           if (added.length > 0 || removed.length > 0) {
             saveConfig(config);
@@ -2855,6 +2926,7 @@ async function startServer() {
     if (removedTokens.length > 0) {
       logInfo(`${removedTokens.length} token(s) removed from CLI credentials`);
       config.authTokens = config.authTokens.filter(t => !removedTokens.includes(t));
+      if (config.tokenEmails) { for (const t of removedTokens) delete config.tokenEmails[t]; }
       changed = true;
     }
     if (changed) { saveConfig(config); await reloadTokenPool(); }
