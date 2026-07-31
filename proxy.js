@@ -466,7 +466,8 @@ async function setupOpencodeConfig(skipRemovalSync) {
         const entry = { name, reasoning: true };
         if (meta) {
           if (meta.modalities) entry.modalities = meta.modalities;
-          if (meta.limit) entry.limit = meta.limit;
+          const limit = modelRegistry.normalizeOpenCodeLimit(meta.limit);
+          if (limit) entry.limit = limit;
         }
         models[m] = entry;
       }
@@ -475,10 +476,11 @@ async function setupOpencodeConfig(skipRemovalSync) {
         for (const m of allRegistryModels) {
           const meta = modelRegistry.getModelMetadata(m);
           const name = meta && meta.premium ? `[LIM] ${modelRegistry.getDisplayName(m)}` : modelRegistry.getDisplayName(m);
-          const entry = { name, reasoning: true };
-          if (meta) {
-            if (meta.modalities) entry.modalities = meta.modalities;
-            if (meta.limit) entry.limit = meta.limit;
+            const entry = { name, reasoning: true };
+            if (meta) {
+              if (meta.modalities) entry.modalities = meta.modalities;
+              const limit = modelRegistry.normalizeOpenCodeLimit(meta.limit);
+              if (limit) entry.limit = limit;
           }
           models[m] = entry;
         }
@@ -907,6 +909,14 @@ class ModelRegistry {
 
   createUnknownMetadata(model, reason) {
     return { displayName: model.split('/').pop(), premium: false, modalities: null, limit: null, metadata_source: reason };
+  }
+
+  normalizeOpenCodeLimit(limit) {
+    if (!limit || typeof limit !== 'object') return null;
+    const normalized = {};
+    if (Number.isFinite(limit.context)) normalized.context = limit.context;
+    if (Number.isFinite(limit.output)) normalized.output = limit.output;
+    return Number.isFinite(normalized.context) && Number.isFinite(normalized.output) ? normalized : null;
   }
 
   getDisplayName(model) {
