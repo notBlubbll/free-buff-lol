@@ -124,9 +124,9 @@ echo ==================================================
 echo.
 
 if "%RUNTIME%"=="bun" (
-    bun run proxy.js
+    bun run index.js
 ) else (
-    node proxy.js
+    node index.js
 )
 
 set EXIT_CODE=%ERRORLEVEL%

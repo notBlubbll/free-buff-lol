@@ -56,7 +56,7 @@ echo.
 set PROXY_RUNTIME=node
 
 :restart_loop
-node proxy.js
+node index.js
 
 set EXIT_CODE=%ERRORLEVEL%
 if %EXIT_CODE% equ 42 (

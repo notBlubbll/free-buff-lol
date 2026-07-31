@@ -2,11 +2,11 @@
   "name": "freebuff-proxy",
   "version": "1.0.0",
   "description": "OpenAI-compatible Freebuff proxy with dynamic agent tracking, token rotation, and Anthropic support",
-  "main": "proxy.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node proxy.js",
-    "dev": "node --watch proxy.js",
-    "start:bun": "bun run proxy.js"
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "start:bun": "bun run index.js"
   },
   "keywords": [
     "freebuff",

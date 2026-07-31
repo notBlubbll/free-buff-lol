@@ -1,6 +1,6 @@
 function start() {
-  const proxy = require('../proxy');
-  return proxy.startServer();
+  const app = require('../index');
+  return app.startServer();
 }
 
 module.exports = { start };
