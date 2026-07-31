@@ -83,6 +83,9 @@ const { createHttpHandlers } = require("./src/http/handlers");
 let config = null;
 let modelRegistry = null;
 let tokenPool = null;
+let activeServer = null;
+let activeIntervals = [];
+let stopTokenWatcher = () => {};
 const startTime = new Date();
 
 const MODEL_MISMATCH_LOG = [];
@@ -616,7 +619,7 @@ async function setupOpencodeConfig(skipRemovalSync) {
         npm: "@ai-sdk/openai-compatible",
         name: "Freebuff Proxy",
         options: {
-          baseURL: `http://localhost:${parseInt(config.listenAddr.replace(":", "")) || 8080}/v1`,
+          baseURL: `http://localhost:${config.listenPort || 8080}/v1`,
         },
         models,
       };
@@ -762,8 +765,9 @@ async function detectCountry() {
 
 // ─── Token File Watcher ───
 let tokenWatcherDebounce = null;
+let tokenWatchers = [];
 function startTokenFileWatcher(paths) {
-  if (!paths || paths.length === 0) return;
+  if (!paths || paths.length === 0) return () => {};
   const watched = new Set();
   for (const credPath of paths) {
     if (watched.has(credPath)) continue;
@@ -821,11 +825,18 @@ function startTokenFileWatcher(paths) {
         }, 1000);
       });
       watched.add(credPath);
+      tokenWatchers.push(watcher);
       logDebug(`[Token Watch] Watching ${credPath}`);
     } catch (e) {
       logWarn(`[Token Watch] Could not watch ${credPath}: ${e.message}`);
     }
   }
+  return () => {
+    for (const watcher of tokenWatchers) watcher.close();
+    tokenWatchers = [];
+    if (tokenWatcherDebounce) clearTimeout(tokenWatcherDebounce);
+    tokenWatcherDebounce = null;
+  };
 }
 
 // ─── Factory Instantiation ───
@@ -1109,7 +1120,8 @@ async function startServer() {
   await modelRegistry.start();
 
   const firstRun = await setupOpencodeConfig();
-  const port = parseInt(config.listenAddr.replace(":", "")) || 8080;
+  const port = config.listenPort || 8080;
+  const host = config.listenHost || "127.0.0.1";
 
   const client = new UpstreamClientClass(config);
   await accountMgr.reconcileAllTokenAccounts(cliAccounts, client);
@@ -1141,9 +1153,22 @@ async function startServer() {
     );
   }
 
-  const server = http.createServer(httpHandlers.handleRequest);
-  server.listen(port + 1, "0.0.0.0", () => {
-    logInfo(`\nFreebuff2Opencode Proxy on http://127.0.0.1:${port}`);
+  const server = http.createServer((req, res) => {
+    res.setTimeout(config.requestTimeout);
+    httpHandlers.handleRequest(req, res).catch((error) => {
+      logError(`[HTTP] Request failed: ${error.message}`);
+      if (!res.headersSent && !res.destroyed) {
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: { message: "Internal server error", type: "server_error" } }));
+      }
+    });
+  });
+  activeServer = server;
+  server.headersTimeout = 15_000;
+  server.requestTimeout = config.requestTimeout;
+  server.keepAliveTimeout = 5_000;
+  server.listen(port, host, () => {
+    logInfo(`\nFreebuff2Opencode Proxy on http://${host}:${port}`);
     logInfo(`  Upstream: ${config.upstreamBaseURL}`);
     logInfo(`  Models: ${modelRegistry.getModels().length}`);
     logInfo(
@@ -1163,9 +1188,9 @@ async function startServer() {
     }
   });
 
-  startTokenFileWatcher(watchedCredentialPaths);
+  stopTokenWatcher = startTokenFileWatcher(watchedCredentialPaths);
 
-  setInterval(async () => {
+  activeIntervals.push(setInterval(async () => {
     const cliResult = loadFreebuffCLITokens();
     const cliTokens = cliResult.tokens;
     const cliAccounts = cliResult.accounts || [];
@@ -1206,10 +1231,10 @@ async function startServer() {
       saveConfig(config);
       await tokenValidation.reloadTokenPool();
     }
-  }, TOKEN_RELOAD_INTERVAL);
+  }, TOKEN_RELOAD_INTERVAL));
 
   const revalidationInterval = config.tokenRevalidateInterval || 5 * 60 * 1000;
-  setInterval(async () => {
+  activeIntervals.push(setInterval(async () => {
     if (!tokenPool || !config.authTokens || config.authTokens.length === 0)
       return;
     logInfo("Re-validating configured tokens...");
@@ -1232,24 +1257,24 @@ async function startServer() {
       )
         await tokenPool.endAllSessionsForToken(result.token);
     }
-  }, revalidationInterval);
+  }, revalidationInterval));
 
-  setInterval(async () => {
+  activeIntervals.push(setInterval(async () => {
     if (!tokenPool || !config.authTokens || config.authTokens.length === 0)
       return;
     const client = new UpstreamClientClass(config);
     await tokenPool.refreshQuota(client);
-  }, 90 * 1000);
+  }, 90 * 1000));
 
-  setInterval(async () => {
+  activeIntervals.push(setInterval(async () => {
     try {
       await accountMgr.checkIdleAccounts();
     } catch (e) {
       logWarn(`[Account] Idle check failed: ${e.message}`);
     }
-  }, 12 * 1000);
+  }, 12 * 1000));
 
-  setInterval(
+  activeIntervals.push(setInterval(
     async () => {
       try {
         await checkAndUpdateVersions();
@@ -1259,8 +1284,28 @@ async function startServer() {
       } catch (e) {}
     },
     60 * 60 * 1000,
-  );
+  ));
 }
 
-module.exports = { startServer };
+async function stopServer() {
+  for (const timer of activeIntervals) clearInterval(timer);
+  activeIntervals = [];
+  stopTokenWatcher();
+  stopTokenWatcher = () => {};
+  if (!activeServer) return;
+  const server = activeServer;
+  activeServer = null;
+  await new Promise((resolve) => {
+    const timeout = setTimeout(resolve, 5000);
+    server.close(() => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
+
+process.once("SIGINT", () => stopServer().finally(() => process.exit(0)));
+process.once("SIGTERM", () => stopServer().finally(() => process.exit(0)));
+
+module.exports = { startServer, stopServer };
 if (require.main === module) startServer();

@@ -40,6 +40,7 @@ function createHttpHandlers(deps) {
     anthropicRequests,
     IS_BUN,
     RUNTIME_VERSION,
+    MAX_BODY_BYTES = 10 * 1024 * 1024,
   } = deps;
   const config = new Proxy(
     {},
@@ -106,10 +107,62 @@ function createHttpHandlers(deps) {
   function readBody(req) {
     return new Promise((resolve, reject) => {
       const chunks = [];
-      req.on("data", (chunk) => chunks.push(chunk));
-      req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-      req.on("error", reject);
+      let size = 0;
+      let settled = false;
+      const fail = (error) => {
+        if (!settled) {
+          settled = true;
+          reject(error);
+        }
+      };
+      const contentLength = Number.parseInt(
+        req.headers["content-length"] || "",
+        10,
+      );
+      if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+        req.resume();
+        fail(
+          Object.assign(new Error("request body too large"), {
+            statusCode: 413,
+          }),
+        );
+        return;
+      }
+      req.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > MAX_BODY_BYTES) {
+          fail(
+            Object.assign(new Error("request body too large"), {
+              statusCode: 413,
+            }),
+          );
+          return;
+        }
+        chunks.push(chunk);
+      });
+      req.on("end", () => {
+        if (!settled) {
+          settled = true;
+          resolve(Buffer.concat(chunks).toString("utf8"));
+        }
+      });
+      req.on("error", fail);
     });
+  }
+
+  function publicConfig() {
+    return {
+      listenAddr: config.listenAddr,
+      listenHost: config.listenHost,
+      listenPort: config.listenPort,
+      upstreamBaseURL: config.upstreamBaseURL,
+      requestTimeout: config.requestTimeout,
+      apiKeyCount: (config.apiKeys || []).length,
+      tokenCount: (config.authTokens || []).length,
+      enabledModels: config.enabledModels,
+      logLevel: config.logLevel,
+      tokenRevalidateInterval: config.tokenRevalidateInterval,
+    };
   }
 
   async function handleHealthz(req, res) {
@@ -450,7 +503,7 @@ function createHttpHandlers(deps) {
 
     if (pathname === "/api/config") {
       if (req.method === "GET") {
-        writeJSON(res, 200, config);
+        writeJSON(res, 200, publicConfig());
         return;
       }
       if (req.method === "POST") {
@@ -458,7 +511,20 @@ function createHttpHandlers(deps) {
           const body = await readBody(req);
           const newConfig = JSON.parse(body);
           const oldEnabled = config.enabledModels || [];
-          Object.assign(config, newConfig);
+          const allowedKeys = [
+            "listenAddr",
+            "listenHost",
+            "listenPort",
+            "upstreamBaseURL",
+            "requestTimeout",
+            "enabledModels",
+            "logLevel",
+            "tokenRevalidateInterval",
+          ];
+          for (const key of allowedKeys) {
+            if (Object.prototype.hasOwnProperty.call(newConfig, key))
+              config[key] = newConfig[key];
+          }
           saveConfig(config);
           await setupOpencodeConfig(true);
           const newEnabled = config.enabledModels || [];
@@ -468,12 +534,16 @@ function createHttpHandlers(deps) {
               logWarn(`[Probe] model probe error: ${e.message}`),
             );
           }
-          writeJSON(res, 200, { success: true, config });
+          writeJSON(res, 200, { success: true, config: publicConfig() });
         } catch (e) {
-          writeJSON(res, 400, { error: e.message });
+          writeJSON(res, e.statusCode || 400, { error: e.message });
         }
         return;
       }
+      writeJSON(res, 405, {
+        error: { message: "method not allowed", type: "invalid_request_error" },
+      });
+      return;
     }
 
     if (pathname === "/api/tokens" && req.method === "GET") {
@@ -741,8 +811,9 @@ function createHttpHandlers(deps) {
       return;
     }
 
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("Not Found");
+    writeJSON(res, 404, {
+      error: { message: "Not Found", type: "invalid_request_error" },
+    });
   }
 
   return {

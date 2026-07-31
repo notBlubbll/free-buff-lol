@@ -4,7 +4,7 @@ const path = require("path");
 function loadConfig({ rootDir, loadCLITokens, parseDuration, logInfo }) {
   const configPath = path.join(rootDir, ".config", "config.json");
   let rawConfig = {
-    LISTEN_ADDR: ":8080",
+    LISTEN_ADDR: "127.0.0.1:8080",
     UPSTREAM_BASE_URL: "https://www.codebuff.com",
     REQUEST_TIMEOUT: "15m",
     LOG_LEVEL: "info",
@@ -73,8 +73,27 @@ function loadConfig({ rootDir, loadCLITokens, parseDuration, logInfo }) {
     }
   } catch (_) {}
 
+  const listenAddr = rawConfig.LISTEN_ADDR.trim();
+  let listenHost = "127.0.0.1";
+  let listenPort = 8080;
+  if (listenAddr.startsWith(":")) {
+    listenPort = Number.parseInt(listenAddr.substring(1), 10);
+  } else {
+    const separator = listenAddr.lastIndexOf(":");
+    if (separator > 0) {
+      listenHost = listenAddr.substring(0, separator).trim() || listenHost;
+      listenPort = Number.parseInt(listenAddr.substring(separator + 1), 10);
+    } else {
+      listenPort = Number.parseInt(listenAddr, 10);
+    }
+  }
+  if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535)
+    throw new Error("LISTEN_ADDR must contain a valid port (1-65535)");
+
   return {
-    listenAddr: rawConfig.LISTEN_ADDR,
+    listenAddr,
+    listenHost,
+    listenPort,
     upstreamBaseURL: baseURL,
     authTokens: [...new Set(rawConfig.AUTH_TOKENS || [])],
     tokenEmails: rawConfig.TOKEN_EMAILS || {},
@@ -109,7 +128,7 @@ function saveConfig(rootDir, cfg) {
     configPath,
     JSON.stringify(
       {
-        LISTEN_ADDR: cfg.listenAddr,
+        LISTEN_ADDR: `${cfg.listenHost || "127.0.0.1"}:${cfg.listenPort || 8080}`,
         UPSTREAM_BASE_URL: cfg.upstreamBaseURL,
         AUTH_TOKENS: cfg.authTokens,
         TOKEN_EMAILS: cfg.tokenEmails || {},

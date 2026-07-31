@@ -1,11 +1,20 @@
 function createErrorWriters({ http }) {
   function writeJSON(res, statusCode, payload) {
+    if (res.headersSent || res.destroyed) return;
     try {
-      res.writeHead(statusCode, { "Content-Type": "application/json" });
+      res.writeHead(statusCode, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      });
       res.end(JSON.stringify(payload));
     } catch (_) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end('{"error":{"message":"encode failed","type":"server_error"}}');
+      if (!res.headersSent && !res.destroyed) {
+        res.writeHead(500, {
+          "Content-Type": "application/json; charset=utf-8",
+        });
+        res.end('{"error":{"message":"encode failed","type":"server_error"}}');
+      }
     }
   }
 
@@ -25,7 +34,7 @@ function createErrorWriters({ http }) {
   }
 
   function writePassthroughError(res, statusCode, body) {
-    const trimmed = body.trim();
+    const trimmed = String(body || "").trim();
     try {
       const payload = JSON.parse(trimmed);
       writeOpenAIError(
@@ -41,7 +50,7 @@ function createErrorWriters({ http }) {
   }
 
   function writeClaudePassthroughError(res, statusCode, body) {
-    const trimmed = body.trim();
+    const trimmed = String(body || "").trim();
     try {
       const payload = JSON.parse(trimmed);
       writeClaudeError(
