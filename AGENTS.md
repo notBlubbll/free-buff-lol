@@ -4,11 +4,14 @@
 
 ```
 FREEBUFF-PROXY/
-├── proxy.js              # Main proxy implementation (~2218 lines)
+├── index.ts              # Active TypeScript application entrypoint
+├── proxy.js              # Legacy monolithic implementation
 ├── dashboard.html        # Anti-slop glass dashboard, Geist font, pure CSS (~368 lines)
 ├── .config/
 │   └── config.json       # Runtime configuration (auto-created)
-├── package.json          # Project metadata (freebuff, node-forge, node-fetch, socks-proxy-agent)
+├── package.json          # Project metadata and Bun/TypeScript scripts
+├── tsconfig.json         # TypeScript compiler configuration
+├── biome.json            # Biome formatter and linter configuration
 ├── start.cmd             # Auto-detect launcher (Bun preferred, Node fallback)
 ├── start-node.cmd        # Node.js-only launcher
 ├── README.md             # User documentation
@@ -355,11 +358,12 @@ Cache session keyed by {token}:{model}
 
 ## Common Issues
 
-### Syntax Errors
+### TypeScript and Syntax Errors
 
 Multiple edits can create duplicate code blocks. Validate with:
 ```bash
-node --check proxy.js
+bun run check
+bun run check:style
 ```
 
 ### Port Conflicts
@@ -413,11 +417,15 @@ If a process must run in the terminal, ensure it's detached or use `&` in Unix s
 ## Testing
 
 ```bash
-# Syntax check
-node --check proxy.js
+# Typecheck and style check
+bun run check
+bun run check:style
+
+# Tests
+bun test
 
 # Start proxy
-node proxy.js
+bun run start
 
 # Test endpoints
 curl http://localhost:8080/healthz

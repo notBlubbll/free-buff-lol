@@ -1,4 +1,6 @@
 node_modules/
+dist/
+.tsbuildinfo
 .config/
 config.json
 *.backup.json

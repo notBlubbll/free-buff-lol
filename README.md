@@ -1,6 +1,6 @@
 # Freebuff2Opencode Proxy
 
-OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free access to multiple LLM models through a unified API. Translated from the Go implementation [Frebuff2API](https://github.com/Quorinex/Freebuff2API) to Node.js/Bun.
+OpenAI- and Anthropic-compatible proxy server for Freebuff, providing free access to multiple LLM models through a unified API. Translated from the Go implementation [Frebuff2API](https://github.com/Quorinex/Freebuff2API) to TypeScript with Bun-first runtime support.
 
 <img width="1183" height="622" alt="image" src="https://github.com/user-attachments/assets/42a8d514-7cc1-44d8-9c7f-779024e5a5e9" />
 
@@ -176,7 +176,7 @@ The proxy automatically detects and loads these tokens on startup.
 
 ### Method 2: Dashboard OAuth UI
 
-1. Start the proxy: `node proxy.js`
+ 1. Start the proxy: `bun run index.ts`
 2. Open dashboard: `http://localhost:8080`
 3. Click "Generate Auth Token" in the token status section
 4. Click the login URL (opens browser)
@@ -200,19 +200,19 @@ The proxy automatically detects and loads these tokens on startup.
 
 ```bash
 cd FREEBUFF-PROXY
-npm install
-node proxy.js
+bun install
+bun run start
 ```
 
 Or with Bun:
 ```bash
-bun run proxy.js
+bun run start
 ```
 
 Or use the Windows launchers:
 ```bash
 start.cmd          # Auto-detects Bun, falls back to Node.js
-start-node.cmd     # Forces Node.js
+  start-node.cmd     # Uses compiled TypeScript with Node.js
 ```
 
 ## Configuration

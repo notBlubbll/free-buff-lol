@@ -2,11 +2,19 @@
   "name": "freebuff-proxy",
   "version": "1.0.0",
   "description": "OpenAI-compatible Freebuff proxy with dynamic agent tracking, token rotation, and Anthropic support",
-  "main": "index.js",
+  "main": "index.ts",
+  "type": "commonjs",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js",
-    "start:bun": "bun run index.js"
+    "start": "bun run index.ts",
+    "dev": "bun --watch index.ts",
+    "start:bun": "bun run index.ts",
+    "build": "bun build index.ts --outdir dist --target node --format cjs",
+    "start:node": "npm run build && node dist/index.js",
+    "check": "tsc --noEmit",
+    "format": "biome format --write .",
+    "lint": "biome lint .",
+    "check:style": "biome check .",
+    "test": "bun test"
   },
   "keywords": [
     "freebuff",
@@ -25,5 +33,12 @@
     "socks": "^2.8.9",
     "socks-proxy-agent": "^8.0.0",
     "undici": "^8.3.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "@types/bun": "latest",
+    "@types/node": "^24.0.0",
+    "@types/node-fetch": "^2.6.12",
+    "typescript": "^5.9.0"
   }
 }

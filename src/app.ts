@@ -1,5 +1,5 @@
 function start() {
-  const app = require('../index');
+  const app = require("../index");
   return app.startServer();
 }
 

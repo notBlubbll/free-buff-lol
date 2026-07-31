@@ -124,9 +124,9 @@ echo ==================================================
 echo.
 
 if "%RUNTIME%"=="bun" (
-    bun run index.js
+    bun run index.ts
 ) else (
-    node index.js
+    call npm run start:node
 )
 
 set EXIT_CODE=%ERRORLEVEL%

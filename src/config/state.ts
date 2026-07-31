@@ -1,17 +1,21 @@
-const fs = require('fs');
-const path = require('path');
+const fs = require("fs");
+const path = require("path");
 
 function createStateStore(rootDir, logWarn) {
-  const statePath = path.join(rootDir, '.config', 'state.json');
+  const statePath = path.join(rootDir, ".config", "state.json");
 
   function load() {
     try {
       if (fs.existsSync(statePath)) {
-        const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+        const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
         const now = Date.now();
         if (state.sessions) {
           for (const [key, session] of Object.entries(state.sessions)) {
-            if (session.expiresAt && new Date(session.expiresAt).getTime() < now) delete state.sessions[key];
+            if (
+              session.expiresAt &&
+              new Date(session.expiresAt).getTime() < now
+            )
+              delete state.sessions[key];
           }
         }
         return state;
@@ -25,7 +29,8 @@ function createStateStore(rootDir, logWarn) {
   function save(state) {
     try {
       const configDir = path.dirname(statePath);
-      if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+      if (!fs.existsSync(configDir))
+        fs.mkdirSync(configDir, { recursive: true });
       fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
     } catch (error) {
       logWarn(`[State] Failed to save state: ${error.message}`);
