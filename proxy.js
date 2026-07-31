@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const nodeFetch = require('node-fetch');
 const {
-  FREE_AGENTS_SOURCE_URL, FREEBUFF_MODELS_SOURCE_URL, MODEL_CONFIG_SOURCE_URL,
+  FREE_AGENTS_SOURCE_URL, FREEBUFF_MODELS_SOURCE_URL, FREEBUFF_MODEL_IDS_SOURCE_URL, MODEL_CONFIG_SOURCE_URL,
   MODEL_REFRESH_INTERVAL, TOKEN_RELOAD_INTERVAL, FREEBUFF2API_RS_SOURCE,
   PROXY_VERSION, NPM_PACKAGE_NAME, IS_BUN, RUNTIME_VERSION, runtime,
   FALLBACK_AGENT_IDS, GEMINI_PARENT_AGENT_ID, GEMINI_SUBAGENT_IDS,
@@ -95,6 +95,15 @@ let startTime = new Date();
 const MODEL_MISMATCH_LOG = [];
 const MODEL_MISMATCH_MAX = 50;
 
+const EVENT_LOG = [];
+const EVENT_LOG_MAX = 200;
+
+function pushEvent(level, message, extra) {
+  const entry = { level, message, at: new Date().toISOString(), ...extra };
+  EVENT_LOG.unshift(entry);
+  if (EVENT_LOG.length > EVENT_LOG_MAX) EVENT_LOG.length = EVENT_LOG_MAX;
+}
+
 function logModelMismatch(requestedModel, actualModel, reason, tokenIdx) {
   const entry = {
     requested: requestedModel,
@@ -147,6 +156,7 @@ function loadConfig() {
     upstreamBaseURL: baseURL,
     authTokens: [...new Set(rawConfig.AUTH_TOKENS || [])],
     tokenEmails: rawConfig.TOKEN_EMAILS || {},
+    tokenAccounts: rawConfig.TOKEN_ACCOUNTS || {},
     requestTimeout,
     apiKeys: [...new Set(rawConfig.API_KEYS || [])],
     mockCountry: rawConfig.MOCK_COUNTRY || null,
@@ -234,7 +244,26 @@ function loadFreebuffCLITokens() {
       } catch (e) { console.error('Failed to parse Freebuff CLI credentials:', e.message); }
     }
   }
-  return { tokens, watchedPaths };
+  const accounts = [];
+  for (const credPath of watchedPaths) {
+    try {
+      const data = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+      const entries = [];
+      if (data.default) entries.push(data.default);
+      entries.push(...Object.values(data).filter(value => value && typeof value === 'object' && value !== data.default));
+      for (const entry of entries) {
+        if (!entry || !entry.authToken) continue;
+        const user = entry.user || entry.account || {};
+        accounts.push({
+          token: entry.authToken,
+          accountId: entry.accountId || entry.userId || user.id || null,
+          email: entry.email || user.email || null,
+          source: 'cli'
+        });
+      }
+    } catch (_) {}
+  }
+  return { tokens, accounts, watchedPaths };
 }
 
 function saveConfig(cfg) {
@@ -250,6 +279,7 @@ function saveConfig(cfg) {
     UPSTREAM_BASE_URL: cfg.upstreamBaseURL,
     AUTH_TOKENS: cfg.authTokens,
     TOKEN_EMAILS: cfg.tokenEmails || {},
+    TOKEN_ACCOUNTS: cfg.tokenAccounts || {},
     REQUEST_TIMEOUT: `${cfg.requestTimeout / (60 * 1000)}m`,
     API_KEYS: cfg.apiKeys,
     ENABLED_MODELS: cfg.enabledModels || [],
@@ -507,16 +537,20 @@ class ModelRegistry {
 
     let loaded = false;
     try {
-      const [modelsSource, agentsSource, configSource] = await Promise.all([
+      const [modelsSource, agentsSource, modelIdsSource, configSource] = await Promise.all([
         this.fetchSource(FREEBUFF_MODELS_SOURCE_URL),
         this.fetchSource(FREE_AGENTS_SOURCE_URL),
+        this.fetchSource(FREEBUFF_MODEL_IDS_SOURCE_URL),
         this.fetchSource(MODEL_CONFIG_SOURCE_URL)
       ]);
 
       const objectLiterals = this.parseObjectLiterals(configSource);
       const modelConstants = this.parseConstants(modelsSource, objectLiterals);
+      const modelIdConstants = this.parseConstants(modelIdsSource, objectLiterals);
+      const configConstants = this.parseConstants(configSource, objectLiterals);
       const agentConstants = this.parseConstants(agentsSource);
-      const variableMap = new Map([...modelConstants, ...agentConstants]);
+      const variableMap = new Map([...configConstants, ...modelIdConstants, ...modelConstants, ...agentConstants]);
+      this.resolveConstantAliases(variableMap, [modelsSource, modelIdsSource, configSource, agentsSource]);
 
       const rootAgentMapping = this.parseRootAgentModelMapping(agentsSource, variableMap);
       const allAgentModels = this.parseAllFreeModels(agentsSource, variableMap);
@@ -533,23 +567,46 @@ class ModelRegistry {
       for (const [model, agent] of GEMINI_FALLBACK_ENTRIES) {
         if (!rootAgentMapping.has(model)) rootAgentMapping.set(model, agent);
       }
+      if (!rootAgentMapping.has('tencent/hy3')) rootAgentMapping.set('tencent/hy3', 'base2-free-hy3-atlas');
       const parsedMetadata = this.parseModelMetadata(modelsSource, variableMap);
+      const userFacingModels = this.parseUserFacingModelIds(modelsSource, variableMap);
+      const configuredModels = Array.isArray(config.enabledModels) ? config.enabledModels.map(canonicalModelName) : [];
+      const compatibilityMetadata = new Map([
+        ['google/gemini-2.5-flash-lite', { displayName: 'Gemini 2.5 Flash Lite', premium: false, multimodal: true, modalities: { input: ['text', 'image'], output: ['text'] }, limit: null, metadata_source: 'local compatibility mapping' }],
+        ['google/gemini-3.1-flash-lite-preview', { displayName: 'Gemini 3.1 Flash Lite', premium: false, multimodal: true, modalities: { input: ['text', 'image'], output: ['text'] }, limit: null, metadata_source: 'local compatibility mapping' }],
+        ['google/gemini-3.1-pro-preview', { displayName: 'Gemini 3.1 Pro', premium: true, multimodal: true, modalities: { input: ['text', 'image'], output: ['text'] }, limit: null, metadata_source: 'local compatibility mapping' }],
+        ['tencent/hy3', { displayName: 'HY3', premium: true, multimodal: false, modalities: { input: ['text'], output: ['text'] }, limit: null, metadata_source: 'local compatibility mapping' }],
+      ]);
+      for (const [model, metadata] of compatibilityMetadata) {
+        if (!parsedMetadata.has(model) && configuredModels.includes(model)) parsedMetadata.set(model, metadata);
+      }
+      // FREEBUFF_MODELS is only the default picker. The source also defines
+      // supported, web, retired, and god-only model options. The metadata
+      // objects are the authoritative union of those catalogs; requiring a
+      // root mapping keeps helper-only models (for example Gemini subagents)
+      // out of the public registry.
+      const catalogModels = Array.from(new Set([
+        ...userFacingModels,
+        ...parsedMetadata.keys(),
+        ...configuredModels,
+      ])).filter(model => rootAgentMapping.has(model));
 
-      if (rootAgentMapping.size > 0) {
+      if (catalogModels.length > 0) {
         const modelToAgent = new Map();
         const allModels = [];
         const modelDisplayNames = new Map();
         const modelMetadata = new Map();
         const agentModels = new Map();
 
-        for (const [model, agent] of rootAgentMapping) {
+        for (const model of catalogModels) {
+          const agent = rootAgentMapping.get(model);
           if (isBlacklistedModel(model)) { logInfo(`Model registry: blacklisted model excluded: ${model}`); continue; }
           modelToAgent.set(model, agent);
           allModels.push(model);
           const meta = parsedMetadata.get(model);
           const displayName = meta ? meta.displayName : model.split('/').pop();
           modelDisplayNames.set(model, displayName);
-          modelMetadata.set(model, meta || { displayName, premium: false, modalities: null, limit: null });
+           modelMetadata.set(model, meta || this.createUnknownMetadata(model, 'catalog model without metadata'));
           if (!agentModels.has(agent)) agentModels.set(agent, []);
           agentModels.get(agent).push(model);
         }
@@ -562,7 +619,7 @@ class ModelRegistry {
         this.modelMetadata = modelMetadata;
         this.lastOK = new Date();
         loaded = true;
-        logInfo(`Model registry: fetched ${allModels.length} models from GitHub: ${allModels.join(', ')}`);
+         logInfo(`Model registry: fetched ${allModels.length} user-facing models from GitHub: ${allModels.join(', ')}`);
       }
     } catch (e) {
       logError('Model registry: GitHub fetch failed:', e.message);
@@ -575,12 +632,12 @@ class ModelRegistry {
       const modelMetadata = new Map();
       const agentModels = new Map();
 
-      for (const entry of HARDCODED_MODELS) {
+       for (const entry of HARDCODED_MODELS) {
         if (isBlacklistedModel(entry.model)) { logInfo(`Model registry: blacklisted hardcoded model excluded: ${entry.model}`); continue; }
         modelToAgent.set(entry.model, entry.agent);
         allModels.push(entry.model);
         modelDisplayNames.set(entry.model, entry.displayName);
-        modelMetadata.set(entry.model, { displayName: entry.displayName, premium: entry.premium, modalities: entry.modalities || null, limit: entry.limit || null });
+        modelMetadata.set(entry.model, { displayName: entry.displayName, premium: entry.premium, modalities: entry.modalities || null, limit: entry.limit || null, metadata_source: 'local fallback' });
         if (!agentModels.has(entry.agent)) agentModels.set(entry.agent, []);
         agentModels.get(entry.agent).push(entry.model);
       }
@@ -623,18 +680,36 @@ class ModelRegistry {
     return constants;
   }
 
+  resolveConstantAliases(variableMap, sources) {
+    const aliases = new Map();
+    for (const source of sources) {
+      const pattern = /export const (\w+)\s*=\s*(\w+)\s*$/gm;
+      let match;
+      while ((match = pattern.exec(source)) !== null) aliases.set(match[1], match[2]);
+    }
+    for (let pass = 0; pass < aliases.size + 1; pass++) {
+      let changed = false;
+      for (const [name, target] of aliases) {
+        const value = variableMap.get(target);
+        if (value && variableMap.get(name) !== value) {
+          variableMap.set(name, value);
+          changed = true;
+        }
+      }
+      if (!changed) break;
+    }
+  }
+
   parseObjectLiterals(source) {
     const result = new Map();
-    const lines = source.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const objMatch = lines[i].match(/^(?:export\s+)?const\s+(\w+)\s*=\s*\{$/);
-      if (!objMatch) continue;
-      const objName = objMatch[1];
-      for (let j = i + 1; j < Math.min(i + 20, lines.length); j++) {
-        const line = lines[j].trim();
-        if (line.startsWith('}')) break;
-        const propMatch = line.match(/^(\w+):\s*['"]([^'"]+)['"]/);
-        if (propMatch) result.set(`${objName}.${propMatch[1]}`, propMatch[2]);
+    const objectPattern = /(?:export\s+)?const\s+(\w+)\s*=\s*\{([\s\S]*?)\}\s*(?:as\s+const)?/g;
+    let objectMatch;
+    while ((objectMatch = objectPattern.exec(source)) !== null) {
+      const objName = objectMatch[1];
+      const propertyPattern = /(?:^|,)\s*(\w+)\s*:\s*['"]([^'"]+)['"]/g;
+      let propertyMatch;
+      while ((propertyMatch = propertyPattern.exec(objectMatch[2])) !== null) {
+        result.set(`${objName}.${propertyMatch[1]}`, propertyMatch[2]);
       }
     }
     return result;
@@ -657,6 +732,52 @@ class ModelRegistry {
       if (models.length > 0) result.set(agentID, models);
     }
     return result;
+  }
+
+  parseUserFacingModelIds(source, variableMap) {
+    const declaration = /export\s+const\s+FREEBUFF_MODELS\s*=\s*/.exec(source);
+    if (!declaration) return [];
+    const start = source.indexOf('[', declaration.index + declaration[0].length);
+    if (start < 0) return [];
+    let depth = 0;
+    let quote = null;
+    let end = -1;
+    for (let i = start; i < source.length; i++) {
+      const char = source[i];
+      if (quote) {
+        if (char === quote && source[i - 1] !== '\\') quote = null;
+        continue;
+      }
+      if (char === "'" || char === '"' || char === '`') { quote = char; continue; }
+      if (char === '[') depth++;
+      else if (char === ']' && --depth === 0) { end = i; break; }
+    }
+    if (end < 0) return [];
+    const arrayBody = source.slice(start + 1, end);
+
+    const objectIds = new Map();
+    const objectPattern = /(?:export\s+)?const\s+(\w+)\s*=\s*\{([\s\S]*?)\}\s*as\s+const/g;
+    let objectMatch;
+    while ((objectMatch = objectPattern.exec(source)) !== null) {
+      const idMatch = objectMatch[2].match(/\bid:\s*(\w+|'[^']+')/);
+      if (!idMatch) continue;
+      const ref = idMatch[1];
+      const id = ref.startsWith("'") ? ref.slice(1, -1) : variableMap.get(ref);
+      if (id) objectIds.set(objectMatch[1], id);
+    }
+
+    const models = [];
+    const seen = new Set();
+    const entryPattern = /(?:\.\.\.)?\b([A-Za-z_$][\w$]*)\b/g;
+    let entryMatch;
+    while ((entryMatch = entryPattern.exec(arrayBody)) !== null) {
+      const model = objectIds.get(entryMatch[1]);
+      if (model && !seen.has(model)) {
+        seen.add(model);
+        models.push(model);
+      }
+    }
+    return models;
   }
 
   parseRootAgentModelMapping(source, variableMap) {
@@ -714,44 +835,78 @@ class ModelRegistry {
 
   parseModelMetadata(source, variableMap) {
     const result = new Map();
-    const lines = source.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const blockMatch = lines[i].match(/^const\s+(\w+)\s*=\s*\{$/);
-      if (!blockMatch) continue;
-      const varName = blockMatch[1];
-      let id = null, displayName = null, premium = false;
-      let contextWindow = null, maxOutput = null;
-      const inputModalities = [], outputModalities = [];
-      for (let j = i + 1; j < Math.min(i + 30, lines.length); j++) {
-        const line = lines[j];
-        if (line.trim().startsWith('}')) break;
-        const idMatch = line.match(/id:\s*(\w+|'[^']*')/);
-        if (idMatch) {
-          const ref = idMatch[1];
-          id = ref.startsWith("'") ? ref.slice(1, -1) : (variableMap.get(ref) || ref);
-        }
-        const dnMatch = line.match(/displayName:\s*'([^']+)'/);
-        if (dnMatch) displayName = dnMatch[1];
-        const premMatch = line.match(/premium:\s*(true|false)/);
-        if (premMatch) premium = premMatch[1] === 'true';
-        const ctxMatch = line.match(/contextWindow:\s*(\d+)/);
-        if (ctxMatch) contextWindow = parseInt(ctxMatch[1]);
-        const maxOutMatch = line.match(/maxOutput:\s*(\d+)/);
-        if (maxOutMatch) maxOutput = parseInt(maxOutMatch[1]);
-        const inModMatch = line.match(/input:\s*\[([^\]]*)\]/);
-        if (inModMatch) inModMatch[1].split(',').forEach(s => { const t = s.trim().replace(/['"]/g, ''); if (t) inputModalities.push(t); });
-        const outModMatch = line.match(/output:\s*\[([^\]]*)\]/);
-        if (outModMatch) outModMatch[1].split(',').forEach(s => { const t = s.trim().replace(/['"]/g, ''); if (t) outputModalities.push(t); });
-      }
-      if (id && displayName) {
-        const modalities = inputModalities.length > 0 || outputModalities.length > 0
-          ? { input: inputModalities.length > 0 ? inputModalities : ['text'], output: outputModalities.length > 0 ? outputModalities : ['text'] }
-          : null;
-        const limit = contextWindow || maxOutput ? { context: contextWindow || null, output: maxOutput || null } : null;
-        result.set(id, { displayName, premium, modalities, limit });
-      }
+    const blockPattern = /(?:export\s+)?const\s+(\w+)\s*=\s*\{/g;
+    let blockMatch;
+    while ((blockMatch = blockPattern.exec(source)) !== null) {
+      const bodyStart = blockMatch.index + blockMatch[0].length;
+      const bodyEnd = this.findMatchingBrace(source, bodyStart - 1);
+      if (bodyEnd < 0) continue;
+      const body = source.slice(bodyStart, bodyEnd);
+      const idMatch = body.match(/\bid:\s*(\w+|'[^']*')/);
+      if (!idMatch) continue;
+      const ref = idMatch[1];
+      const id = ref.startsWith("'") ? ref.slice(1, -1) : variableMap.get(ref);
+      if (!id) continue;
+      const displayMatch = body.match(/\bdisplayName:\s*'([^']+)'/);
+      const premiumMatch = body.match(/\bpremium:\s*(true|false)/);
+      const multimodalMatch = body.match(/\bmultimodal:\s*(true|false)/);
+      const availabilityMatch = body.match(/\bavailability:\s*'([^']+)'/);
+      const taglineMatch = body.match(/\btagline:\s*'([^']+)'/);
+      const dataUseMatch = body.match(/\bdataUse:\s*'([^']+)'/);
+      const warningMatch = body.match(/\bwarning:\s*([^,\n]+)/);
+      const experimentalMatch = body.match(/\bexperimental:\s*(true|false)/);
+      const contextWindow = this.parseContextWindow(source, id, variableMap);
+      const multimodal = multimodalMatch ? multimodalMatch[1] === 'true' : null;
+      const metadata = {
+        displayName: displayMatch ? displayMatch[1] : id.split('/').pop(),
+        tagline: taglineMatch ? taglineMatch[1] : null,
+        availability: availabilityMatch ? availabilityMatch[1] : null,
+        premium: premiumMatch ? premiumMatch[1] === 'true' : false,
+        multimodal,
+        modalities: multimodal === null ? null : { input: multimodal ? ['text', 'image'] : ['text'], output: ['text'] },
+        limit: contextWindow ? { context: contextWindow, output: null } : null,
+        data_use: dataUseMatch ? dataUseMatch[1] : null,
+        warning: warningMatch ? (warningMatch[1].trim().startsWith("'") ? warningMatch[1].trim().slice(1, -1) : warningMatch[1].trim().includes('TRAINING_NOTICE') ? 'May use data for AI training' : null) : null,
+        experimental: experimentalMatch ? experimentalMatch[1] === 'true' : false,
+        metadata_source: FREEBUFF_MODELS_SOURCE_URL,
+        context_window_source: contextWindow ? `${FREEBUFF_MODELS_SOURCE_URL}:FREEBUFF_MODEL_CONTEXT_WINDOWS` : null,
+      };
+      result.set(id, metadata);
     }
     return result;
+  }
+
+  findMatchingBrace(source, start) {
+    let depth = 0;
+    let quote = null;
+    for (let i = start; i < source.length; i++) {
+      const char = source[i];
+      if (quote) {
+        if (char === quote && source[i - 1] !== '\\') quote = null;
+        continue;
+      }
+      if (char === "'" || char === '"' || char === '`') { quote = char; continue; }
+      if (char === '{') depth++;
+      else if (char === '}' && --depth === 0) return i;
+    }
+    return -1;
+  }
+
+  parseContextWindow(source, modelId, variableMap = new Map()) {
+    const tableMatch = source.match(/FREEBUFF_MODEL_CONTEXT_WINDOWS\s*:[^=]*=\s*\{([\s\S]*?)\n\}/);
+    if (!tableMatch) return null;
+    const entryPattern = /\[([^\]]+)\]\s*:\s*([\d_]+)/g;
+    let entry;
+    while ((entry = entryPattern.exec(tableMatch[1])) !== null) {
+      const key = entry[1].trim();
+      const resolved = variableMap.get(key) || key.replace(/^['"]|['"]$/g, '');
+      if (resolved === modelId) return Number(entry[2].replace(/_/g, '')) || null;
+    }
+    return null;
+  }
+
+  createUnknownMetadata(model, reason) {
+    return { displayName: model.split('/').pop(), premium: false, modalities: null, limit: null, metadata_source: reason };
   }
 
   getDisplayName(model) {
@@ -779,6 +934,7 @@ function normalizeChatMessages(messages) {
     if (!msg || typeof msg !== 'object') continue;
     const item = { ...msg };
     if (item.role === 'developer') item.role = 'system';
+    if (Array.isArray(item.content)) item.content = normalizeMultimodalContent(item.content);
     if (item.role === 'system') {
       hasSystem = true;
       let content = item.content || '';
@@ -1018,6 +1174,23 @@ class UpstreamClient {
     return await this.doJSON(authToken, '/api/v1/freebuff/streak', null, 'GET');
   }
 
+  async getAccountIdentity(authToken) {
+    for (const pth of ['/api/v1/user', '/api/user', '/api/v1/me', '/api/me']) {
+      const response = await this.doJSON(authToken, pth, null, 'GET');
+      if (response.status === 404) continue;
+      if (response.status === 401 || response.status === 403) return { status: 'unauthorized', error: `identity lookup failed ${response.status}` };
+      if (response.status >= 500) throw new Error(`identity lookup failed ${response.status}`);
+      if (response.status < 200 || response.status >= 300) continue;
+      let body;
+      try { body = JSON.parse(response.body); } catch (_) { continue; }
+      const user = body.user || body.account || body.profile || body.data || body;
+      const accountId = user.id || user.userId || user.accountId || user.uuid || body.userId || body.accountId || null;
+      const email = user.email || user.mail || body.email || null;
+      if (accountId || email) return { status: 'resolved', accountId: accountId ? String(accountId) : null, email: email ? String(email).trim().toLowerCase() : null, endpoint: pth };
+    }
+    return { status: 'temporary', error: 'upstream returned no account identity' };
+  }
+
   async reportZeroclickImpression(authToken, ids) {
     if (!ids || ids.length === 0) return;
     const headers = {
@@ -1048,6 +1221,265 @@ class UpstreamClient {
   }
 }
 
+function tokenFingerprint(token) {
+  return crypto.createHash('sha256').update(token).digest('hex').slice(0, 16);
+}
+
+function normalizeEmail(email) {
+  return typeof email === 'string' && email.trim() ? email.trim().toLowerCase() : null;
+}
+
+function accountIdentityKey(identity, token) {
+  if (identity.accountId) return `id:${identity.accountId}`;
+  if (identity.email) return `email:${normalizeEmail(identity.email)}`;
+  return `temp:${tokenFingerprint(token)}`;
+}
+
+function accountForToken(token) {
+  return config?.tokenAccounts?.[token] || {
+    accountId: config?.tokenEmails?.[token] ? `email:${normalizeEmail(config.tokenEmails[token])}` : `temp:${tokenFingerprint(token)}`,
+    email: normalizeEmail(config?.tokenEmails?.[token]),
+    temporary: !config?.tokenEmails?.[token],
+    identityStatus: config?.tokenEmails?.[token] ? 'legacy' : 'unknown'
+  };
+}
+
+function markAccountUsed(token) {
+  if (!token) return;
+  if (!config.tokenAccounts) config.tokenAccounts = {};
+  const account = accountForToken(token);
+  config.tokenAccounts[token] = { ...account, lastUsedAt: new Date().toISOString() };
+  if (!markAccountUsed.lastPersistAt || Date.now() - markAccountUsed.lastPersistAt > 120000) {
+    markAccountUsed.lastPersistAt = Date.now();
+    saveConfig(config);
+  }
+}
+
+function accountCheckInfo(token) {
+  const account = accountForToken(token);
+  const sessionQuota = tokenPool ? tokenPool.getUsageForToken(token) : null;
+  return {
+    last_used_at: account.lastUsedAt || null,
+    last_account_check_at: account.lastAccountCheckAt || null,
+    last_account_check_status: account.lastAccountCheckStatus || 'never',
+    last_account_check_error: account.lastAccountCheckError || null,
+    quota: mergeQuotaSources(account.quota, sessionQuota)
+  };
+}
+
+function normalizeMultimodalContent(content) {
+  if (!Array.isArray(content)) return content;
+  return content.map(part => {
+    if (!part || typeof part !== 'object') return part;
+    if (part.type === 'image' && part.source) {
+      const source = part.source;
+      if (source.type === 'base64' && source.media_type && source.data) {
+        return { type: 'image_url', image_url: { url: `data:${source.media_type};base64,${source.data}` } };
+      }
+      if (source.type === 'url' && source.url) {
+        return { type: 'image_url', image_url: { url: source.url } };
+      }
+    }
+    if (part.type === 'image_url' || part.type === 'video_url' || part.type === 'text') return part;
+    return part;
+  });
+}
+
+function extractQuota(state) {
+  if (!state || typeof state !== 'object') return null;
+  const direct = state.rateLimit || state.rate_limit || state.usage || state.quota || state.data?.rateLimit || state.data?.rate_limit || state.data?.quota;
+  if (direct) return direct;
+  const limits = state.rateLimitsByModel || state.data?.rateLimitsByModel;
+  if (!limits || typeof limits !== 'object') return null;
+  const modelQuota = (state.model && limits[state.model]) || Object.values(limits)[0];
+  if (!modelQuota || typeof modelQuota !== 'object') return null;
+  return { ...modelQuota, model: state.model || modelQuota.model || null, rateLimitsByModel: limits };
+}
+
+function mergeQuotaSources(primary, fallback) {
+  if (!primary && !fallback) return null;
+  const merged = { ...(fallback || {}), ...(primary || {}) };
+  const primaryModels = primary?.rateLimitsByModel;
+  const fallbackModels = fallback?.rateLimitsByModel;
+  if (primaryModels || fallbackModels) {
+    merged.rateLimitsByModel = { ...(fallbackModels || {}), ...(primaryModels || {}) };
+  }
+  return merged;
+}
+
+function removeTokenMetadata(token) {
+  if (config.tokenEmails) delete config.tokenEmails[token];
+  if (config.tokenAccounts) delete config.tokenAccounts[token];
+}
+
+async function resolveAndReconcileToken(token, hint = {}, client = null) {
+  if (!token) return { token, changed: false, identity: null };
+  if (!config.tokenAccounts) config.tokenAccounts = {};
+  if (!config.tokenEmails) config.tokenEmails = {};
+  const current = accountForToken(token);
+  let identity;
+  if (hint.accountId || hint.email) {
+    identity = { status: 'resolved', accountId: hint.accountId ? String(hint.accountId) : null, email: normalizeEmail(hint.email), endpoint: hint.source || 'credential' };
+  } else {
+    try { identity = client ? await client.getAccountIdentity(token) : { status: 'pending', error: 'identity lookup unavailable' }; }
+    catch (e) { identity = { status: 'pending', error: e.message }; }
+  }
+  const resolved = identity.status === 'resolved';
+  const accountId = resolved ? accountIdentityKey(identity, token) : accountIdentityKey({}, token);
+  const duplicate = resolved ? config.authTokens.find(other => {
+    if (other === token) return false;
+    const metadata = accountForToken(other);
+    return metadata.accountId === accountId || (identity.email && normalizeEmail(metadata.email) === identity.email);
+  }) : null;
+
+  if (duplicate) {
+    if (tokenPool) await tokenPool.endAllSessionsForToken(duplicate);
+    config.authTokens = config.authTokens.filter(value => value !== duplicate);
+    removeTokenMetadata(duplicate);
+    logInfo(`[Account] Replaced old token ${duplicate.substring(0, 8)}... with newer credential for ${identity.email || accountId}`);
+  }
+  config.authTokens = [...new Set([...config.authTokens.filter(value => value !== token), token])];
+  config.tokenAccounts[token] = {
+    accountId,
+    email: resolved ? (identity.email || current.email || null) : (current.email || null),
+    temporary: !resolved,
+    identityStatus: identity.status,
+    identityCheckedAt: new Date().toISOString(),
+    identityEndpoint: identity.endpoint || null,
+    identityError: identity.error || null,
+    source: hint.source || current.source || 'config'
+  };
+  if (config.tokenAccounts[token].email) config.tokenEmails[token] = config.tokenAccounts[token].email;
+  return { token, changed: Boolean(duplicate), identity: config.tokenAccounts[token], replaced: duplicate || null };
+}
+
+async function reconcileAllTokenAccounts(entries = [], client = null) {
+  const hints = new Map(entries.filter(entry => entry && entry.token).map(entry => [entry.token, entry]));
+  const replacements = [];
+  for (const token of [...new Set(config.authTokens || [])]) {
+    if (!config.authTokens.includes(token)) continue;
+    const result = await resolveAndReconcileToken(token, hints.get(token) || {}, client);
+    if (result.replaced) replacements.push(result.replaced);
+  }
+  saveConfig(config);
+  return replacements;
+}
+
+async function checkIdleAccounts() {
+  if (checkIdleAccounts.running) return;
+  checkIdleAccounts.running = true;
+  try {
+  if (!tokenPool || !config.authTokens?.length) return;
+  const now = Date.now();
+  const client = tokenPool.client;
+  let changed = false;
+  for (const token of tokenPool.tokens) {
+    const account = accountForToken(token);
+    const lastUsed = account.lastUsedAt ? new Date(account.lastUsedAt).getTime() : 0;
+    const lastChecked = account.lastAccountCheckAt ? new Date(account.lastAccountCheckAt).getTime() : 0;
+    if (lastChecked && now - lastChecked < 12000) continue;
+    if (lastUsed && now - lastUsed < 12000) continue;
+    const checkedAt = new Date().toISOString();
+    const maskedToken = `${token.substring(0, 8)}...${token.substring(token.length - 4)}`;
+    const accountLabel = account.email || account.accountId || maskedToken;
+    logInfo(`[Account Check] Starting ${accountLabel} (${maskedToken})`);
+    try {
+      const identity = await client.getAccountIdentity(token);
+      let quota = null;
+      const activeSession = tokenPool.getSessionForToken(token);
+      if (activeSession?.instanceID) {
+        logInfo(`[Account Check] ${accountLabel}: refreshing existing session`);
+        const state = await client.getSession(token, activeSession.instanceID);
+        quota = extractQuota(state);
+        logInfo(`[Account Check] ${accountLabel}: session response status=${state?.status || 'none'}, keys=${Object.keys(state || {}).join(',')}, quota_keys=${quota ? Object.keys(quota).join(',') : 'none'}`);
+        if (quota) tokenPool.updateTokenUsage(token, activeSession.model || quota.model, quota);
+        if (!quota) {
+          const probeModel = activeSession.model || tokenPool.lockedModels.get(token) || '';
+          logInfo(`[Account Check] ${accountLabel}: session had no quota, forcing probe${probeModel ? ` for ${probeModel}` : ''}`);
+          const probeState = await client.createSession(token, probeModel);
+          quota = extractQuota(probeState);
+          logInfo(`[Account Check] ${accountLabel}: forced probe status=${probeState?.status || 'none'}, keys=${Object.keys(probeState || {}).join(',')}, quota_keys=${quota ? Object.keys(quota).join(',') : 'none'}`);
+          if (probeState?.instanceId) {
+            const session = tokenPool._sessionFromState(probeState);
+            session.model = probeState.model || probeModel || session.model;
+            tokenPool.sessions.set(tokenPool.sessionKey(token, session.model), session);
+          }
+          if (quota) tokenPool.updateTokenUsage(token, probeModel || quota.model, quota);
+        }
+      } else {
+        // Explicitly probe accounts without a local session and retain the result.
+        logInfo(`[Account Check] ${accountLabel}: probing upstream session quota`);
+        const state = await client.createSession(token);
+        const model = state?.model || state?.rateLimit?.model || '__account__';
+        if (state?.instanceId) {
+          const session = tokenPool._sessionFromState(state);
+          session.model = model;
+          tokenPool.sessions.set(tokenPool.sessionKey(token, model), session);
+          if (state.status === 'active') tokenPool.lockedModels.delete(token);
+        }
+        quota = extractQuota(state);
+        logDebug(`[Account Check] ${accountLabel}: probe response keys=${Object.keys(state || {}).join(',')}, quota_keys=${quota ? Object.keys(quota).join(',') : 'none'}`);
+        if (quota) tokenPool.updateTokenUsage(token, model, quota);
+      }
+      if (!quota) quota = tokenPool.getUsageForToken(token);
+      if (quota) {
+        const remaining = Math.max(0, Number(quota.limit) - Number(quota.recentCount));
+        const status = Number(quota.limit) > 0 && Number(quota.recentCount) >= Number(quota.limit) ? 'rate_limited' : 'usable';
+        logInfo(`[Account Check] ${accountLabel}: ${status}, ${remaining}/${quota.limit} requests remaining${quota.resetAt ? `, reset ${quota.resetAt}` : ''}`);
+      } else {
+        logWarn(`[Account Check] ${accountLabel}: upstream returned no quota data`);
+      }
+      config.tokenAccounts[token] = {
+        ...account,
+        ...(identity.status === 'resolved' ? {
+          accountId: accountIdentityKey(identity, token),
+          email: identity.email || account.email || null,
+          temporary: false,
+          identityStatus: 'resolved',
+          identityEndpoint: identity.endpoint || account.identityEndpoint || null
+        } : {}),
+        lastAccountCheckAt: checkedAt,
+        lastAccountCheckStatus: quota ? (Number(quota.limit) > 0 && Number(quota.recentCount) >= Number(quota.limit) ? 'rate_limited' : 'quota_checked') : 'quota_unavailable',
+        lastAccountCheckError: quota ? null : (identity.error || 'Upstream returned no quota data'),
+        quota: quota ? {
+          model: quota.model || null,
+          limit: Number(quota.limit) || 0,
+          recentCount: Number(quota.recentCount) || 0,
+          resetAt: quota.resetAt || null,
+          period: quota.period || null,
+          entitlement: quota.entitlement || null,
+          rateLimitsByModel: quota.rateLimitsByModel || null,
+          checkedAt
+        } : account.quota || null
+      };
+      if (config.tokenAccounts[token].email) config.tokenEmails[token] = config.tokenAccounts[token].email;
+      changed = true;
+    } catch (e) {
+      tokenPool.updateTokenUsageFromError(token, null, e);
+      const quota = tokenPool.getUsageForToken(token) || account.quota || null;
+      logDebug(`[Account Check] ${accountLabel}: error response retained quota=${quota ? `${quota.recentCount}/${quota.limit}` : 'none'}`);
+      if (quota) {
+        const remaining = Math.max(0, Number(quota.limit) - Number(quota.recentCount));
+        logWarn(`[Account Check] ${accountLabel}: rate-limited, ${remaining}/${quota.limit} requests remaining${quota.resetAt ? `, reset ${quota.resetAt}` : ''}`);
+      } else {
+        logError(`[Account Check] ${accountLabel}: failed: ${e.message}`);
+      }
+      config.tokenAccounts[token] = {
+        ...account,
+        lastAccountCheckAt: checkedAt,
+        lastAccountCheckStatus: quota ? (Number(quota.limit) > 0 && Number(quota.recentCount) >= Number(quota.limit) ? 'rate_limited' : 'quota_checked') : 'error',
+        lastAccountCheckError: quota ? null : e.message,
+        quota: quota ? { ...quota, checkedAt } : account.quota || null
+      };
+      changed = true;
+    }
+  }
+  if (changed) saveConfig(config);
+  } finally {
+    checkIdleAccounts.running = false;
+  }
+}
+
 // --- Token Pool (sessions keyed by token:sessionModel) ---
 class TokenPool {
   constructor(tokens, cfg, client) {
@@ -1059,6 +1491,7 @@ class TokenPool {
     this.lockedModels = new Map();
     this.mutex = Promise.resolve();
     this.tokenHealth = new Map();
+    this.tokenUsage = new Map();
 
     // Load persisted state
     const state = loadState();
@@ -1078,6 +1511,7 @@ class TokenPool {
         if (tokens.includes(token)) {
           session.expiresAt = session.expiresAt ? new Date(session.expiresAt) : null;
           this.sessions.set(key, session);
+          if (session.rateLimit) this.updateTokenUsage(token, session.model || key.substring(token.length + 1), session.rateLimit);
         }
       }
     }
@@ -1125,23 +1559,30 @@ class TokenPool {
     try { return await fn(); } finally { release(); }
   }
 
-  getToken() {
+  getToken(model = null, excluded = new Set()) {
     if (this.tokens.length === 0) return null;
-    const scored = this.tokens.map(token => {
+    const start = this.currentIndex % this.tokens.length;
+    const scored = this.tokens.map((token, offset) => {
       const health = this.tokenHealth.get(token) || { status: 'unknown' };
-      if (health.status === 'banned' || health.status === 'unauthorized') return null;
-      let remaining = 6;
-      for (const [key, session] of this.sessions.entries()) {
-        if (key.startsWith(token + ':') && session.rateLimit) {
-          remaining = session.rateLimit.limit - session.rateLimit.recentCount;
-          break;
-        }
-      }
-      return { token, remaining };
-    }).filter(Boolean).sort((a, b) => b.remaining - a.remaining || 0);
+      if (excluded.has(token) || health.status === 'banned' || health.status === 'unauthorized') return null;
+      const usage = this.getUsageForToken(token, model);
+      if (usage && usage.limit > 0 && usage.recentCount >= usage.limit) return null;
+      const remaining = usage && usage.limit > 0 ? usage.limit - usage.recentCount : null;
+      const distance = (offset + start) % this.tokens.length;
+      return { token, remaining, distance };
+    }).filter(Boolean).sort((a, b) => {
+      if (a.remaining === null && b.remaining !== null) return 1;
+      if (a.remaining !== null && b.remaining === null) return -1;
+      return (b.remaining || 0) - (a.remaining || 0) || a.distance - b.distance;
+    });
     if (scored.length === 0) return null;
-    this.currentIndex = (this.currentIndex + 1) % this.tokens.length;
+    const selectedIndex = this.tokens.indexOf(scored[0].token);
+    this.currentIndex = (selectedIndex + 1) % this.tokens.length;
     return scored[0].token;
+  }
+
+  dispose() {
+    if (this._stateSaveTimer) clearInterval(this._stateSaveTimer);
   }
 
   sessionKey(token, model) { return `${token}:${model}`; }
@@ -1154,7 +1595,7 @@ class TokenPool {
     const accessTier = state.accessTier || null;
     const countryBlockReason = state.countryBlockReason || null;
     const model = state.model || null;
-    const rl = state.rateLimit;
+    const rl = extractQuota(state);
     const rateLimit = rl ? {
       model: rl.model || null,
       entitlement: rl.entitlement || null,
@@ -1165,7 +1606,90 @@ class TokenPool {
       recentCount: rl.recentCount || 0,
       rateLimitsByModel: rl.rateLimitsByModel || null
     } : null;
-    return { status: 'active', instanceID, expiresAt, countryCode, remainingMs, accessTier, countryBlockReason, model, rateLimit };
+    return { status: 'active', instanceID, expiresAt, countryCode, remainingMs, accessTier, countryBlockReason, model, rateLimit, rateLimitUpdatedAt: rateLimit ? Date.now() : null };
+  }
+
+  getUsageForToken(token, model = null) {
+    const direct = model ? this.tokenUsage.get(`${token}:${model}`) : null;
+    if (direct) return direct;
+    const candidates = [];
+    for (const [key, session] of this.sessions.entries()) {
+      if (!key.startsWith(token + ':') || !session.rateLimit) continue;
+      if (!model || session.model === model || key === this.sessionKey(token, model)) candidates.push(session);
+    }
+    if (candidates.length === 0) {
+      const stored = [...this.tokenUsage.entries()]
+        .filter(([key]) => key.startsWith(token + ':') && (!model || key === `${token}:${model}`))
+        .map(([, usage]) => usage)
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      return stored[0] || null;
+    }
+    return candidates.sort((a, b) => (b.rateLimitUpdatedAt || 0) - (a.rateLimitUpdatedAt || 0))[0].rateLimit;
+  }
+
+  isQuotaFull(token, model = null) {
+    const usage = this.getUsageForToken(token, model);
+    return !!(usage && usage.limit > 0 && usage.recentCount >= usage.limit);
+  }
+
+  getEffectiveTokenStatus(token, model = null) {
+    const health = this.tokenHealth.get(token) || { status: 'unknown', error: null, checkedAt: null };
+    if (health.status === 'banned' || health.status === 'unauthorized') return health.status;
+    return this.isQuotaFull(token, model) ? 'rate_limited' : health.status;
+  }
+
+  updateTokenUsage(token, model, rateLimit) {
+    if (!token || !rateLimit) return;
+    const normalized = {
+      model: rateLimit.model || model || null,
+      entitlement: rateLimit.entitlement || null,
+      limit: Number(rateLimit.limit) || 0,
+      period: rateLimit.period || null,
+      resetAt: rateLimit.resetAt || null,
+      windowHours: Number(rateLimit.windowHours) || 0,
+      recentCount: Number(rateLimit.recentCount) || 0,
+      rateLimitsByModel: rateLimit.rateLimitsByModel || null,
+      updatedAt: Date.now()
+    };
+    this.tokenUsage.set(`${token}:${model || normalized.model || ''}`, normalized);
+    for (const [key, session] of this.sessions.entries()) {
+      if (key.startsWith(token + ':') && (!model || session.model === model)) {
+        session.rateLimit = normalized;
+        session.rateLimitUpdatedAt = normalized.updatedAt;
+      }
+    }
+  }
+
+  async refreshQuota(client) {
+    for (const token of this.tokens) {
+      const sessions = [...this.sessions.entries()]
+        .filter(([key, s]) => key.startsWith(token + ':') && s.instanceID && s.status === 'active')
+        .map(([key, s]) => ({ model: key.split(':')[1], ...s }));
+      for (const session of sessions) {
+        try {
+          const state = await client.getSession(token, session.instanceID);
+          const quota = extractQuota(state);
+          if (quota) this.updateTokenUsage(token, session.model, quota);
+        } catch (e) {
+          logDebug(`[Quota] getSession failed for ${token.substring(0, 8)}...: ${e.message}`);
+        }
+      }
+    }
+  }
+
+  updateTokenUsageFromError(token, model, error) {
+    const message = error?.message || String(error);
+    const match = message.match(/\{[\s\S]*\}$/);
+    if (!match) return null;
+    try {
+      const data = JSON.parse(match[0]);
+      if (data.limit !== undefined || data.recentCount !== undefined || data.status === 'rate_limited') {
+        this.updateTokenUsage(token, model, data);
+        this.setTokenHealth(token, { status: data.status === 'rate_limited' || Number(data.recentCount) >= Number(data.limit) ? 'rate_limited' : 'active', error: message, checkedAt: new Date().toISOString() });
+        return data;
+      }
+    } catch (_) {}
+    return null;
   }
 
   async ensureSession(token, model) {
@@ -1173,6 +1697,7 @@ class TokenPool {
     const locked = await this.withLock(async () => this.lockedModels.get(token));
     if (locked && locked !== requestedModel) {
       logInfo(`${token.substring(0, 8)}...: request for ${requestedModel} differs from cached lock ${locked}, ending session to unlock`);
+      pushEvent('model_switch', `Ending session to unlock`, { from: locked, to: requestedModel, reason: 'model_mismatch_unlock', token: token.substring(0, 8) + '...' });
       await this.endAllSessionsForToken(token);
       try { await this.client.endSession(token); } catch (e2) { logError(`endSession(no-id) failed: ${e2.message}`); }
       await this.withLock(async () => { this.lockedModels.delete(token); });
@@ -1186,6 +1711,9 @@ class TokenPool {
         if (!session) return { ready: false };
         if (session.status === 'active' && session.instanceID) {
           if (!session.expiresAt || Date.now() < session.expiresAt.getTime() - 5000) {
+            if (this.isQuotaFull(token, model)) {
+              throw new Error(`free session request failed 429: ${JSON.stringify(this.getUsageForToken(token, model))}`);
+            }
             return { ready: true, instanceID: session.instanceID, model: session.model || model, accessTier: session.accessTier };
           }
         }
@@ -1209,8 +1737,9 @@ class TokenPool {
 
         const instanceID = (state.instanceId || '').trim();
         if (!instanceID) throw new Error('free session active response missing instanceId');
-        const session = this._sessionFromState(state);
-        const rl = state.rateLimit;
+         const session = this._sessionFromState(state);
+         this.updateTokenUsage(token, model, session.rateLimit);
+        const rl = extractQuota(state);
         if (rl && rl.rateLimitsByModel && rl.recentCount >= rl.limit) {
           const reqModelCount = rl.rateLimitsByModel[requestedModel];
           if (!reqModelCount || reqModelCount.recentCount >= reqModelCount.limit) {
@@ -1219,6 +1748,7 @@ class TokenPool {
               .map(([m]) => m);
             if (available.length > 0 && !available.includes(requestedModel)) {
               logInfo(`${key.substring(0, 20)}...: model ${requestedModel} at quota, falling back to ${available[0]}`);
+              pushEvent('model_switch', `Model ${requestedModel} at quota, falling back`, { from: requestedModel, to: available[0], reason: 'quota_fallback', token: token.substring(0, 8) + '...' });
               await this.endAllSessionsForToken(token);
               try { await this.client.endSession(token); } catch (_) {}
               model = available[0];
@@ -1227,7 +1757,8 @@ class TokenPool {
               state = await this.pollUntilReady(token, model, state);
               const newInstanceID = (state.instanceId || '').trim();
               if (!newInstanceID) throw new Error('free session fallback missing instanceId');
-              Object.assign(session, this._sessionFromState(state));
+               Object.assign(session, this._sessionFromState(state));
+               this.updateTokenUsage(token, model, session.rateLimit);
             }
           }
         }
@@ -1235,6 +1766,7 @@ class TokenPool {
         let returnModel = model;
         if (boundModel && boundModel !== requestedModel) {
           logInfo(`${key.substring(0, 20)}...: server bound session to ${boundModel} (requested ${requestedModel}), accepting bound model`);
+          pushEvent('model_switch', `Server bound session to ${boundModel}`, { from: requestedModel, to: boundModel, reason: 'session_created_with_different_model', token: token.substring(0, 8) + '...' });
           await this.withLock(async () => { this.lockedModels.set(token, boundModel); });
           const boundKey = this.sessionKey(token, boundModel);
           await this.withLock(async () => { this.sessions.delete(key); this.sessions.set(boundKey, session); });
@@ -1253,6 +1785,7 @@ class TokenPool {
           try { const parsed = JSON.parse(errorMsg); if (parsed.type === 'model_locked' && parsed.body && parsed.body.currentModel) lockedModel = parsed.body.currentModel; } catch (_) {}
           if (lockedModel) {
             logInfo(`${key.substring(0, 20)}...: server locked to ${lockedModel}, switching to locked model`);
+            pushEvent('model_switch', `Server locked to ${lockedModel}`, { from: model, to: lockedModel, reason: 'model_locked', token: token.substring(0, 8) + '...' });
             await this.endAllSessionsForToken(token);
             try { await this.client.endSession(token); } catch (_) {}
             try {
@@ -1261,7 +1794,8 @@ class TokenPool {
               const instanceID = (polled.instanceId || '').trim();
               if (instanceID) {
                 const newKey = this.sessionKey(token, lockedModel);
-                const session = this._sessionFromState(polled);
+                 const session = this._sessionFromState(polled);
+                 this.updateTokenUsage(token, lockedModel, session.rateLimit);
                 await this.withLock(async () => {
                   this.sessions.delete(key);
                   this.lockedModels.set(token, lockedModel);
@@ -1296,8 +1830,15 @@ class TokenPool {
         await this.withLock(async () => { this.sessions.delete(key); });
         this.persistState();
         logError(`${key.substring(0, 20)}...: session error: ${e.message}`);
+        pushEvent('error', `Session error: ${e.message}`, { detail: e.message, model, token: token.substring(0, 8) + '...' });
+
+        if (errorMsg.includes('403') && errorMsg.includes('banned')) {
+          this.setTokenHealth(token, { valid: false, status: 'banned', error: e.message, checkedAt: new Date().toISOString() });
+          break;
+        }
 
         if (errorMsg.includes('429') || errorMsg.includes('rate_limited')) {
+          this.updateTokenUsageFromError(token, model, e);
           throw e;
         }
 
@@ -1399,6 +1940,14 @@ class TokenPool {
     this.withLock(async () => { this.sessions.delete(key); }).then(() => this.persistState());
   }
 
+  invalidateAllSessionsForToken(token) {
+    this.withLock(async () => {
+      for (const key of this.sessions.keys()) {
+        if (key.startsWith(token + ':')) this.sessions.delete(key);
+      }
+    }).then(() => this.persistState());
+  }
+
   getTokenHealth(token) {
     return this.tokenHealth.get(token) || { status: 'unknown', error: null, checkedAt: null };
   }
@@ -1430,11 +1979,22 @@ class TokenPool {
     return false;
   }
 
-  getSessionForToken(token) {
+  getSessionForToken(token, model = null) {
+    let fallback = null;
     for (const [key, session] of this.sessions.entries()) {
-      if (key.startsWith(token + ':') && session.status === 'active') return session;
+      if (!key.startsWith(token + ':') || session.status !== 'active') continue;
+      if (model && (session.model === model || key === this.sessionKey(token, model))) return session;
+      fallback = fallback || session;
     }
-    return null;
+    return fallback;
+  }
+
+  hasUsableTokensForModel(model) {
+    for (const token of this.tokens) {
+      const health = this.tokenHealth.get(token) || { status: 'unknown' };
+      if (health.status !== 'banned' && health.status !== 'unauthorized' && !this.isQuotaFull(token, model)) return true;
+    }
+    return false;
   }
 
   getAggregatedUsage() {
@@ -1445,10 +2005,11 @@ class TokenPool {
     for (const token of this.tokens) {
       const session = this.getSessionForToken(token);
       if (session && session.rateLimit) {
-        totalUsed += session.rateLimit.recentCount || 0;
-        totalLimit += session.rateLimit.limit || 0;
-        if (session.rateLimit.resetAt) {
-          const resetTime = new Date(session.rateLimit.resetAt).getTime();
+        const quota = quotaSummary(session.rateLimit);
+        totalUsed += quota.used;
+        totalLimit += quota.limit;
+        if (quota.resetAt) {
+          const resetTime = new Date(quota.resetAt).getTime();
           if (!earliestReset || resetTime < earliestReset) earliestReset = resetTime;
         }
         if (session.rateLimit.windowHours) windowHours = Math.min(windowHours, session.rateLimit.windowHours);
@@ -1466,6 +2027,28 @@ class TokenPool {
       estimatedDepletionMinutes
     };
   }
+}
+
+function quotaSummary(quota) {
+  const models = quota?.rateLimitsByModel && typeof quota.rateLimitsByModel === 'object'
+    ? Object.values(quota.rateLimitsByModel).filter(v => v && Number(v.limit) > 0)
+    : [];
+  if (models.length > 0) {
+    const selected = models.reduce((best, value) => {
+      const remaining = Math.max(0, Number(value.limit) - Number(value.recentCount || 0));
+      return !best || remaining > best.remaining ? { value, remaining } : best;
+    }, null);
+    return {
+      used: Number(selected.value.recentCount) || 0,
+      limit: Number(selected.value.limit) || 0,
+      resetAt: selected.value.resetAt || quota.resetAt || null,
+    };
+  }
+  return {
+    used: Number(quota?.recentCount) || 0,
+    limit: Number(quota?.limit) || 0,
+    resetAt: quota?.resetAt || null,
+  };
 }
 
 // --- Run Chain Helpers ---
@@ -1728,14 +2311,20 @@ async function handleHealthz(req, res) {
     const bestSession = allSessions.find(s => s.status === 'active') || allSessions[0] || null;
     const lockedModel = tokenPool.lockedModels.get(token) || null;
     const health = tokenPool.getTokenHealth(token);
-    const rl = bestSession?.rateLimit;
+    const rl = bestSession?.rateLimit || tokenPool.getUsageForToken(token);
+    const mergedQuota = mergeQuotaSources(accountForToken(token).quota, rl);
+    const effectiveStatus = tokenPool.getEffectiveTokenStatus(token, rl?.model || null);
     return {
       name: `token-${idx + 1}`,
       token: maskedToken,
-      health_status: health.status,
+      email: config.tokenEmails?.[token] || null,
+      account_id: accountForToken(token).accountId,
+      temporary_account: Boolean(accountForToken(token).temporary),
+      ...accountCheckInfo(token),
+      health_status: effectiveStatus,
       health_error: health.error,
       health_checked_at: health.checkedAt,
-      session_status: bestSession?.status || 'none',
+      session_status: effectiveStatus === 'rate_limited' ? 'rate_limited' : (bestSession?.status || 'none'),
       session_instance_id: bestSession?.instanceID || null,
       session_expires_at: bestSession?.expiresAt || null,
       country_code: bestSession?.countryCode || runtime.detectedCountry || null,
@@ -1751,12 +2340,13 @@ async function handleHealthz(req, res) {
         resetAt: rl.resetAt,
         windowHours: rl.windowHours,
         entitlement: rl.entitlement
-      } : null
+      } : null,
+      quota: mergedQuota,
     };
   });
   const usableCount = tokenPool.tokens.filter(t => {
     const h = tokenPool.getTokenHealth(t);
-    return h.status !== 'banned' && h.status !== 'unauthorized';
+    return h.status !== 'banned' && h.status !== 'unauthorized' && !tokenPool.isQuotaFull(t);
   }).length;
   const usage = tokenPool.getAggregatedUsage();
   writeJSON(res, 200, {
@@ -1770,6 +2360,7 @@ async function handleHealthz(req, res) {
     dead_tokens: tokenPool.tokens.length - usableCount,
     locked_tokens: tokenState.filter(t => t.locked_model).length,
     model_mismatches: MODEL_MISMATCH_LOG.slice(0, 10),
+    recent_events: EVENT_LOG.slice(0, 30),
     runtime: IS_BUN ? 'bun' : 'node',
     runtime_version: RUNTIME_VERSION
   });
@@ -1778,7 +2369,10 @@ async function handleHealthz(req, res) {
 async function handleModels(req, res) {
   if (req.method !== 'GET') { writeOpenAIError(res, 405, 'method not allowed', 'invalid_request_error', ''); return; }
   const created = Math.floor(startTime.getTime() / 1000);
-  writeJSON(res, 200, { object: 'list', data: modelRegistry.getModels().map(m => ({ id: m, object: 'model', created, owned_by: 'Freebuff2Opencode', root: m, permission: [] })) });
+  writeJSON(res, 200, { object: 'list', data: modelRegistry.getModels().map(m => {
+    const metadata = modelRegistry.getModelMetadata(m) || {};
+    return { id: m, object: 'model', created, owned_by: 'Freebuff2Opencode', root: m, permission: [], ...metadata };
+  }) });
 }
 
 async function handleChatCompletions(req, res) {
@@ -1829,7 +2423,7 @@ function countOpenAIPayloadTokens(model, payload) {
 async function proxyChatRequest(res, payload, requestedModel, writeError, writeUpstreamError, writeSuccess) {
   const reqStart = Date.now();
 
-  if (!tokenPool.hasUsableTokens()) {
+  if (!tokenPool.hasUsableTokensForModel(requestedModel)) {
     const health = tokenPool ? tokenPool.getAllTokenHealth() : {};
     const deadSummary = Object.values(health).reduce((acc, h) => {
       if (h.status === 'banned' || h.status === 'unauthorized') acc[h.status] = (acc[h.status] || 0) + 1;
@@ -1843,8 +2437,9 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     return;
   }
 
-  const token = tokenPool.getToken();
+  const token = tokenPool.getToken(requestedModel);
   if (!token) { writeError(res, 503, 'no authentication tokens configured', 'server_error', 'no_tokens'); return; }
+  markAccountUsed(token);
   const client = tokenPool.client;
 
   try { await client.validateAgents(token); } catch (_) {}
@@ -1877,30 +2472,26 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
         if (tokenPool.tokens.length > preReloadTried) {
           logInfo(`[Token Rotate] Pool has ${tokenPool.tokens.length} tokens but only ${preReloadTried} tried, checking for new tokens...`);
         }
-        const nextToken = tokenPool.getToken();
+        const nextToken = tokenPool.getToken(currentModel, triedTokens);
         if (nextToken && !triedTokens.has(nextToken)) {
           logInfo(`[Token Rotate] ${currentToken.substring(0, 8)}... rate limited on ${currentModel}, trying ${nextToken.substring(0, 8)}...`);
           triedTokens.add(nextToken);
           currentToken = nextToken;
+          markAccountUsed(currentToken);
           await new Promise(r => setTimeout(r, 300));
           continue;
         }
         // All known tokens tried — check if pool grew (hot-reload)
         if (tokenPool.tokens.length > triedTokens.size) {
-          for (const t of tokenPool.tokens) {
-            if (!triedTokens.has(t)) {
-              const h = tokenPool.getTokenHealth(t);
-              if (h.status !== 'banned' && h.status !== 'unauthorized') {
-                logInfo(`[Token Rotate] Found new token ${t.substring(0, 8)}... from hot-reload, trying it`);
-                triedTokens.add(t);
-                currentToken = t;
-                await new Promise(r => setTimeout(r, 300));
-                continue;
-              }
-            }
+          const hotReloadToken = tokenPool.getToken(currentModel, triedTokens);
+          if (hotReloadToken) {
+            logInfo(`[Token Rotate] Found new token ${hotReloadToken.substring(0, 8)}... from hot-reload, trying it`);
+            triedTokens.add(hotReloadToken);
+            currentToken = hotReloadToken;
+            markAccountUsed(currentToken);
+            await new Promise(r => setTimeout(r, 300));
+            continue;
           }
-          // If we found a new token above, continue the outer loop
-          if (currentToken !== token || triedTokens.size > preReloadTried + 1) continue;
         }
         break;
       }
@@ -2000,6 +2591,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     if (resp.status === 429) {
       const errorBodyStr = await readBodyText(resp.body);
       logWarn(`[Rate Limit] 429: ${errorBodyStr.substring(0, 200)}`);
+      pushEvent('warn', 'Rate limited (429)', { detail: errorBodyStr.substring(0, 200), model: actualModel });
       for (let retry = 0; retry < 3; retry++) {
         const waitMs = (retry + 1) * 3000;
         logInfo(`[Rate Limit] Waiting ${waitMs / 1000}s before retry ${retry + 1}/3...`);
@@ -2029,6 +2621,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
 
     const errorBodyStr = await readBodyText(resp.body);
     logError(`[Upstream Error] ${resp.status}: ${errorBodyStr.substring(0, 200)}`);
+    pushEvent('error', `[Upstream Error] ${resp.status}`, { detail: errorBodyStr.substring(0, 200), model: actualModel, status: resp.status });
 
     if (isSessionInvalid(resp.status, errorBodyStr)) {
       let errorType = '';
@@ -2052,13 +2645,16 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
         }
       } catch (e) {}
       logWarn(`[Session Invalid] status=${resp.status}, error=${errorType}${lockedModel ? ', lockedModel=' + lockedModel : ''}`);
+      pushEvent('warn', `Session invalid: ${errorType}`, { detail: `status=${resp.status}${lockedModel ? ', lockedModel=' + lockedModel : ''}`, model: actualModel, requestedModel, errorType });
       
       if (errorType === 'session_superseded') {
         logModelMismatch(requestedModel, actualModel, 'session_superseded', tokenPool.tokens.indexOf(currentToken));
+        tokenPool.invalidateAllSessionsForToken(currentToken);
       }
 
       if (errorType === 'freebuff_update_required' || resp.status === 426) {
         logWarn(`[Version] Server requires update, invalidating session and retrying...`);
+        pushEvent('warn', 'Server requires update', { detail: 'freebuff_update_required', model: actualModel });
       }
       tokenPool.invalidateSession(currentToken, actualModel);
       if (requestedModel !== actualModel) tokenPool.invalidateSession(currentToken, requestedModel);
@@ -2067,6 +2663,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
         mismatchUnlockAttempted = true;
         logModelMismatch(requestedModel, lockedModel, 'session_model_mismatch_unlock_retry', tokenPool.tokens.indexOf(currentToken));
         logInfo(`[Model Lock] Mismatch: session bound to ${lockedModel}. Ending session to unlock and retrying requested model ${requestedModel}`);
+        pushEvent('model_switch', `Unlocking session to retry requested model`, { from: lockedModel, to: requestedModel, reason: 'session_model_mismatch_unlock_retry', token: currentToken.substring(0, 8) + '...' });
         await tokenPool.clearLockedModel(currentToken);
         currentModel = requestedModel;
         continue;
@@ -2074,6 +2671,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
       if (lockedModel) {
         logModelMismatch(currentModel, lockedModel, 'model_locked_fallback', tokenPool.tokens.indexOf(currentToken));
         logInfo(`[Model Lock] Switching from ${currentModel} to ${lockedModel}`);
+        pushEvent('model_switch', `Switched to locked model`, { from: currentModel, to: lockedModel, reason: 'model_locked_fallback', token: currentToken.substring(0, 8) + '...' });
         await tokenPool.setLockedModel(currentToken, lockedModel);
         tokenPool.invalidateSession(currentToken, lockedModel);
         currentModel = lockedModel;
@@ -2097,7 +2695,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
     const fallbackCandidates = allModels
       .filter(m => m !== requestedModel && !m.includes('gemini'))
       .slice(0, 5);
-    const fallbackToken = tokenPool.getToken() || token;
+    const fallbackToken = token;
     for (const candidate of fallbackCandidates) {
       try {
         logInfo(`[Fallback] All tokens rate limited on ${requestedModel}, trying model ${candidate}`);
@@ -2105,6 +2703,7 @@ async function proxyChatRequest(res, payload, requestedModel, writeError, writeU
         logModelMismatch(requestedModel, candidate, 'rate_limit_fallback', tokenPool.tokens.indexOf(fallbackToken));
         currentModel = candidate;
         currentToken = fallbackToken;
+        markAccountUsed(currentToken);
         mismatchUnlockAttempted = false;
         // Re-enter the main flow with the fallback model
         const canonicalModel = canonicalModelName(candidate);
@@ -2356,7 +2955,21 @@ function convertClaudeMessagesRequestToOpenAI(body) {
     const content = rawMessage.content;
     let text = '';
     if (typeof content === 'string') text = content;
-    else if (Array.isArray(content)) text = content.filter(p => p && p.type === 'text').map(p => p.text || '').join('\n');
+    else if (Array.isArray(content)) {
+      const parts = content.map(part => {
+        if (!part || typeof part !== 'object') return part;
+        if (part.type === 'text') return { type: 'text', text: part.text || '' };
+        if (part.type === 'image') {
+          const source = part.source || {};
+          if (source.type === 'base64' && source.media_type && source.data) return { type: 'image_url', image_url: { url: `data:${source.media_type};base64,${source.data}` } };
+          if (source.type === 'url' && source.url) return { type: 'image_url', image_url: { url: source.url } };
+        }
+        if (part.type === 'image_url' || part.type === 'video_url') return part;
+        return null;
+      }).filter(Boolean);
+      if (parts.length > 0) messages.push({ role, content: parts });
+      continue;
+    }
     if (text.trim()) messages.push({ role, content: text.trim() });
   }
   out.messages = messages;
@@ -2404,9 +3017,18 @@ async function validateToken(token) {
   const now = new Date().toISOString();
   try {
     const client = new UpstreamClient(config);
+    const cached = tokenPool?.getSessionForToken(token);
+    if (cached?.instanceID) {
+      try {
+        const existing = await client.getSession(token, cached.instanceID);
+        if (existing && (existing.status === 'active' || existing.status === 'queued')) {
+          return { valid: true, status: 'active', error: null, checkedAt: now, lockedModel: cached.model || existing.model || null, session: existing };
+        }
+      } catch (_) {}
+    }
     let session = await client.createSession(token);
     if (session && session.status === 'active') {
-      return { valid: true, status: 'active', error: null, checkedAt: now, lockedModel: session.model || null };
+      return { valid: true, status: 'active', error: null, checkedAt: now, lockedModel: session.model || null, session };
     }
     return { valid: false, status: 'unknown', error: `unexpected session status: ${session ? session.status : 'empty'}`, checkedAt: now };
   } catch (e) {
@@ -2417,7 +3039,7 @@ async function validateToken(token) {
         const client2 = new UpstreamClient(config);
         const session = await client2.createSession(token, lockedModel);
         if (session && session.status === 'active') {
-          return { valid: true, status: 'active', error: null, checkedAt: now, lockedModel };
+          return { valid: true, status: 'active', error: null, checkedAt: now, lockedModel, session };
         }
         return { valid: false, status: 'unknown', error: `locked model ${lockedModel} not active`, checkedAt: now };
       } catch (e2) {
@@ -2433,6 +3055,7 @@ async function validateToken(token) {
 
 function classifyTokenError(e) {
   const msg = (e && e.message) || String(e);
+  if (msg.includes('429') && (msg.includes('rate_limited') || msg.includes('"limit"'))) return 'rate_limited';
   if (msg.includes('403') && msg.includes('banned')) return 'banned';
   if (msg.includes('401') || msg.includes('Invalid API key') || msg.includes('unauthorized')) return 'unauthorized';
   if (msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('network') || msg.includes('fetch failed')) return 'network_error';
@@ -2454,14 +3077,74 @@ async function validateAllTokens() {
 async function reloadTokenPool() {
   config = loadConfig();
   const client = new UpstreamClient(config);
-  const previousHealth = tokenPool ? tokenPool.getAllTokenHealth() : {};
+  const previousPool = tokenPool;
+  const previousHealth = previousPool ? previousPool.getAllTokenHealth() : {};
+  const previousSessions = previousPool ? previousPool.sessions : new Map();
+  const previousLocks = previousPool ? previousPool.lockedModels : new Map();
+  if (previousPool) previousPool.dispose();
   tokenPool = new TokenPool(config.authTokens, config, client);
+  for (const [key, session] of previousSessions.entries()) {
+    const token = key.split(':')[0];
+    if (config.authTokens.includes(token)) tokenPool.sessions.set(key, session);
+  }
+  for (const [token, model] of previousLocks.entries()) {
+    if (config.authTokens.includes(token)) tokenPool.lockedModels.set(token, model);
+  }
   for (const [token, health] of Object.entries(previousHealth)) {
     if (config.authTokens.includes(token)) {
       tokenPool.setTokenHealth(token, health);
     }
   }
-  logInfo(`TokenPool reloaded with ${config.authTokens.length} token(s)`);
+  logInfo(`TokenPool reloaded with ${config.authTokens.length} token(s), preserved ${tokenPool.sessions.size} session(s)`);
+}
+
+async function probeNewModels(models) {
+  if (!tokenPool || !tokenPool.tokens || tokenPool.tokens.length === 0) return;
+  const client = new UpstreamClient(config);
+  const remaining = [...models];
+  for (const token of tokenPool.tokens) {
+    if (remaining.length === 0) break;
+    for (const [key, session] of tokenPool.sessions.entries()) {
+      if (!key.startsWith(token + ':')) continue;
+      if (session.rateLimit && session.rateLimit.rateLimitsByModel) {
+        for (const model of remaining) {
+          if (session.rateLimit.rateLimitsByModel[model]) {
+            tokenPool.updateTokenUsage(token, model, session.rateLimit);
+            remaining.splice(remaining.indexOf(model), 1);
+          }
+        }
+      }
+    }
+  }
+  if (remaining.length > 0 && tokenPool.getToken()) {
+    const probeToken = tokenPool.getToken();
+    const probeModel = (config.enabledModels || [])[0];
+    if (probeToken && probeModel) {
+      try {
+        const state = await client.createSession(probeToken, probeModel);
+        const quota = extractQuota(state);
+        if (quota) {
+          tokenPool.updateTokenUsage(probeToken, probeModel, quota);
+          if (quota.rateLimitsByModel) {
+            for (const model of remaining) {
+              if (quota.rateLimitsByModel[model]) {
+                tokenPool.updateTokenUsage(probeToken, model, quota.rateLimitsByModel[model]);
+                remaining.splice(remaining.indexOf(model), 1);
+              }
+            }
+          }
+        }
+        if (state && state.instanceId) {
+          client.endSession(probeToken, state.instanceId).catch(() => {});
+        }
+      } catch (e) {
+        tokenPool.updateTokenUsageFromError(probeToken, null, e);
+      }
+    }
+  }
+  if (remaining.length < models.length) {
+    logInfo(`[Probe] Pre-seeded quota data for ${models.length - remaining.length}/${models.length} new model(s)`);
+  }
 }
 
 // --- Main Request Handler ---
@@ -2484,8 +3167,20 @@ async function handleRequest(req, res) {
   if (pathname === '/api/config') {
     if (req.method === 'GET') { writeJSON(res, 200, config); return; }
     if (req.method === 'POST') {
-      try { const body = await readBody(req); const newConfig = JSON.parse(body); config = { ...config, ...newConfig }; saveConfig(config); await setupOpencodeConfig(true); writeJSON(res, 200, { success: true, config }); }
-      catch (e) { writeJSON(res, 400, { error: e.message }); }
+      try {
+        const body = await readBody(req);
+        const newConfig = JSON.parse(body);
+        const oldEnabled = config.enabledModels || [];
+        config = { ...config, ...newConfig };
+        saveConfig(config);
+        await setupOpencodeConfig(true);
+        const newEnabled = config.enabledModels || [];
+        const added = newEnabled.filter(m => !oldEnabled.includes(m));
+        if (added.length > 0 && tokenPool) {
+          probeNewModels(added).catch(e => logWarn(`[Probe] model probe error: ${e.message}`));
+        }
+        writeJSON(res, 200, { success: true, config });
+      } catch (e) { writeJSON(res, 400, { error: e.message }); }
       return;
     }
   }
@@ -2515,14 +3210,11 @@ async function handleRequest(req, res) {
         if (config.authTokens.includes(data.user.authToken)) {
           data.tokenAdded = false;
           data.duplicateReason = 'Token already configured';
-        } else if (email && Object.values(config.tokenEmails).includes(email)) {
-          data.tokenAdded = false;
-          data.duplicateReason = 'Account ' + email + ' is already configured';
         } else {
           config.authTokens.push(data.user.authToken);
-          if (email) config.tokenEmails[data.user.authToken] = email;
+          await resolveAndReconcileToken(data.user.authToken, { email, accountId: data.user.id || data.user.userId || data.user.accountId || null, source: 'oauth' }, new UpstreamClient(config));
           saveConfig(config);
-          reloadTokenPool();
+          await reloadTokenPool();
           logInfo('New auth token added via OAuth' + (email ? ' (' + email + ')' : ''));
           data.tokenAdded = true;
         }
@@ -2532,7 +3224,24 @@ async function handleRequest(req, res) {
     return;
   }
 
-  if (pathname === '/api/models' && req.method === 'GET') { writeJSON(res, 200, { models: modelRegistry.getModels(), model_metadata: modelRegistry.getAllModelMetadata() }); return; }
+  if (pathname === '/api/models' && req.method === 'GET') {
+    writeJSON(res, 200, {
+      models: modelRegistry.getModels(),
+      model_metadata: modelRegistry.getAllModelMetadata(),
+      registry: {
+        source: 'GitHub CodebuffAI/codebuff main/common/src/constants',
+        sources: {
+          catalog: FREEBUFF_MODELS_SOURCE_URL,
+          stable_ids: FREEBUFF_MODEL_IDS_SOURCE_URL,
+          agent_mapping: FREE_AGENTS_SOURCE_URL,
+          model_constants: MODEL_CONFIG_SOURCE_URL,
+        },
+        refresh_interval_ms: MODEL_REFRESH_INTERVAL,
+        last_ok: modelRegistry.lastOK,
+      }
+    });
+    return;
+  }
 
   if (pathname === '/api/bg' && req.method === 'GET') {
     try { const response = await fetch('https://peapix.com/bing/feed'); const data = await response.json(); const item = Array.isArray(data) ? data[0] : data; const imgUrl = item.fullUrl || item.imageUrl || item.url || ''; if (imgUrl) writeJSON(res, 200, { url: imgUrl }); else writeJSON(res, 404, { error: 'not found' }); }
@@ -2585,6 +3294,18 @@ async function handleRequest(req, res) {
     return;
   }
 
+  if (pathname === '/api/events' && req.method === 'GET') {
+    const parsedUrl2 = url.parse(req.url, true);
+    const limit = Math.min(parseInt(parsedUrl2.query.limit) || 50, 200);
+    const since = parsedUrl2.query.since || null;
+    let events = EVENT_LOG;
+    if (since) {
+      events = events.filter(e => e.at > since);
+    }
+    writeJSON(res, 200, { events: events.slice(0, limit), total: EVENT_LOG.length });
+    return;
+  }
+
   if (pathname === '/api/usage' && req.method === 'GET') {
     if (!tokenPool) { writeJSON(res, 503, { ok: false, error: 'token pool not ready' }); return; }
     const tokens = tokenPool.tokens.map((token, idx) => {
@@ -2593,12 +3314,17 @@ async function handleRequest(req, res) {
       return {
         name: `token-${idx + 1}`,
         token: token.substring(0, 8) + '...' + token.substring(token.length - 4),
+        account_id: accountForToken(token).accountId,
+        email: accountForToken(token).email || null,
+        temporary_account: Boolean(accountForToken(token).temporary),
+        ...accountCheckInfo(token),
         model: rl?.model || null,
         recentCount: rl?.recentCount || 0,
         limit: rl?.limit || 0,
         resetAt: rl?.resetAt || null,
         entitlement: rl?.entitlement || null,
-        health: tokenPool.getTokenHealth(token)
+        health: tokenPool.getTokenHealth(token),
+        account: accountForToken(token)
       };
     });
     writeJSON(res, 200, { tokens, summary: tokenPool.getAggregatedUsage() });
@@ -2669,10 +3395,11 @@ function startTokenFileWatcher(paths) {
           const { tokens: newCliTokens } = loadFreebuffCLITokens();
           const oldTokens = new Set(config.authTokens || []);
           const added = newCliTokens.filter(t => !oldTokens.has(t));
-          const removed = [...oldTokens].filter(t => t.startsWith('freebuff_') === false && !newCliTokens.includes(t));
+          const removed = [];
           if (added.length > 0) {
             logInfo(`[Token Watch] ${added.length} new token(s) detected`);
             for (const token of added) {
+              await resolveAndReconcileToken(token, (loadFreebuffCLITokens().accounts || []).find(account => account.token === token) || {}, new UpstreamClient(config));
               const result = await validateToken(token);
               if (result.valid) {
                 config.authTokens.push(token);
@@ -2712,6 +3439,7 @@ async function startServer() {
 
   const cliResult = loadFreebuffCLITokens();
   const cliTokens = cliResult.tokens;
+  const cliAccounts = cliResult.accounts || [];
   const watchedCredentialPaths = cliResult.watchedPaths;
   if (cliTokens.length > 0) {
     logInfo(`[Config] Found ${cliTokens.length} token(s) in CLI credentials`);
@@ -2733,17 +3461,25 @@ async function startServer() {
 
   const firstRun = await setupOpencodeConfig();
 
-  const allTokenResults = await validateAllTokens();
-  const validTokens = allTokenResults.filter(r => r.valid);
   const port = parseInt(config.listenAddr.replace(':', '')) || 8080;
 
   const client = new UpstreamClient(config);
+  await reconcileAllTokenAccounts(cliAccounts, client);
+  const allTokenResults = await validateAllTokens();
+  const validTokens = allTokenResults.filter(r => r.valid);
 
   // Keep all configured tokens in the pool so the dashboard can show banned/unauthorized ones,
   // but apply health info so dead tokens are skipped during request routing.
   tokenPool = new TokenPool(config.authTokens, config, client);
   for (const result of allTokenResults) {
     tokenPool.setTokenHealth(result.token, result);
+    if (result.session && result.session.instanceId) {
+      const session = tokenPool._sessionFromState(result.session);
+      const model = result.session.model || session.model || result.lockedModel || '';
+      if (model) tokenPool.sessions.set(tokenPool.sessionKey(result.token, model), session);
+      if (session.rateLimit) tokenPool.updateTokenUsage(result.token, model, session.rateLimit);
+      if (result.lockedModel) tokenPool.lockedModels.set(result.token, result.lockedModel);
+    }
   }
   const usableCount = tokenPool.tokens.filter(t => {
     const h = tokenPool.getTokenHealth(t);
@@ -2777,14 +3513,17 @@ async function startServer() {
   startTokenFileWatcher(watchedCredentialPaths);
 
   setInterval(async () => {
-    const { tokens: cliTokens } = loadFreebuffCLITokens();
+    const cliResult = loadFreebuffCLITokens();
+    const cliTokens = cliResult.tokens;
+    const cliAccounts = cliResult.accounts || [];
     const currentTokens = new Set(config.authTokens || []);
     const newTokens = cliTokens.filter(t => !currentTokens.has(t));
-    const removedTokens = [...currentTokens].filter(t => !cliTokens.includes(t));
+    const removedTokens = [];
     let changed = false;
     if (newTokens.length > 0) {
       logInfo(`Found ${newTokens.length} new token(s) in CLI credentials`);
       for (const token of newTokens) {
+        await resolveAndReconcileToken(token, cliAccounts.find(account => account.token === token) || {}, new UpstreamClient(config));
         const result = await validateToken(token);
         if (result.valid) {
           config.authTokens.push(token);
@@ -2809,6 +3548,7 @@ async function startServer() {
   setInterval(async () => {
     if (!tokenPool || !config.authTokens || config.authTokens.length === 0) return;
     logInfo('Re-validating configured tokens...');
+    await reconcileAllTokenAccounts([], tokenPool.client);
     const results = await validateAllTokens();
     for (const result of results) {
       const previous = tokenPool.getTokenHealth(result.token);
@@ -2825,6 +3565,17 @@ async function startServer() {
       }
     }
   }, revalidationInterval);
+
+  // Periodic quota refresh (every 90s) — updates rate-limit data from active sessions
+  setInterval(async () => {
+    if (!tokenPool || !config.authTokens || config.authTokens.length === 0) return;
+    const client = new UpstreamClient(config);
+    await tokenPool.refreshQuota(client);
+  }, 90 * 1000);
+
+  setInterval(async () => {
+    try { await checkIdleAccounts(); } catch (e) { logWarn(`[Account] Idle check failed: ${e.message}`); }
+  }, 12 * 1000);
 
   setInterval(async () => {
     try { await checkAndUpdateVersions(); } catch (e) { /* ignore */ }
